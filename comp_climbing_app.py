@@ -28,6 +28,14 @@ ALL_RATINGS = [
     "IFSC-ELO-Semies", "IFSC-ELO-Finals",
 ]
 DEFAULT_ATHLETES = ["Oscar Baudrand", "Matthew Rodriguez", "Colin Duffy"]
+DISPLAY_OVERRIDES = {
+    "baudrandoscar": "Oscar Baudrand",
+    "matthewrodriguez": "Matthew Rodriguez",
+    "colinduffy": "Colin Duffy",
+    "madisonrichardson": "Madison Richardson",
+    "babetteroy": "Babette Roy",
+    "anniesanders": "Annie Sanders",
+}
 PALETTE = {
     "ink": "#102F2B",
     "teal": "#0B7A75",
@@ -55,6 +63,11 @@ def plain_key(value: object) -> str:
     # A token-sorted key reconciles that presentation difference; pool remains
     # part of every rating join so men/women and disciplines cannot cross-match.
     return "".join(sorted(plain.split()))
+
+
+def friendly_name(value: object) -> str:
+    text = str(value or "").strip()
+    return DISPLAY_OVERRIDES.get(plain_key(text), text)
 
 
 @st.cache_data(show_spinner=False, ttl=900, max_entries=2)
@@ -316,14 +329,14 @@ def add_selected_highlight(
         figure.add_trace(
             go.Scatter(
                 x=[row[x]], y=[row[y]], mode="markers+text",
-                text=[row["athlete_name"]], textposition="top center",
+                text=[friendly_name(row["athlete_name"])], textposition="top center",
                 marker={
                     "size": 18, "color": PALETTE["gold"],
                     "line": {"width": 3, "color": PALETTE["ink"]},
                     "symbol": "diamond" if row.get("gender") == "Women" else "circle",
                 },
                 hovertemplate=(
-                    f"<b>{row['athlete_name']}</b><br>{y}: %{{y:.0f}}"
+                    f"<b>{friendly_name(row['athlete_name'])}</b><br>{y}: %{{y:.0f}}"
                     f"<br>{x}: %{{x:.1f}}<extra></extra>"
                 ),
                 showlegend=False,
@@ -365,6 +378,8 @@ def pool_scatter(
     plot = frame.dropna(subset=[x, rating]).copy()
     if plot.empty:
         return go.Figure().update_layout(title="No matched ratings for this view")
+    if "display_name" not in plot:
+        plot["display_name"] = plot["athlete_name"].map(friendly_name)
     plot["Last result"] = plot.get("days_since_last_result", np.nan)
     plot["Momentum"] = plot["momentum"].round(1)
     figure = px.scatter(
@@ -375,7 +390,7 @@ def pool_scatter(
         color_continuous_scale="RdYlGn",
         color_continuous_midpoint=0,
         symbol="gender",
-        hover_name="athlete_name",
+        hover_name="display_name",
         hover_data={
             "country": True, "momentum": ":.1f",
             "days_since_last_result": True, x: ":.1f", rating: ":.0f",
@@ -419,12 +434,12 @@ def compare_text(
         return "The selected athletes do not yet have matched evidence in this pool."
     leader = focus.iloc[0]
     if len(focus) == 1:
-        return f"{leader['athlete_name']} is shown at {leader[rating]:.0f} {rating}."
+        return f"{friendly_name(leader['athlete_name'])} is shown at {leader[rating]:.0f} {rating}."
     trailer = focus.iloc[-1]
     gap = leader[rating] - trailer[rating]
     base = (
-        f"{leader['athlete_name']} leads this comparison at {leader[rating]:.0f}. "
-        f"The displayed gap to {trailer['athlete_name']} is {gap:.0f} points. "
+        f"{friendly_name(leader['athlete_name'])} leads this comparison at {leader[rating]:.0f}. "
+        f"The displayed gap to {friendly_name(trailer['athlete_name'])} is {gap:.0f} points. "
     )
     if context == "Canadian":
         rank = leader.get("cnr_rank", np.nan)
@@ -577,7 +592,7 @@ def render_wr_pool(
     if not country_pool.empty:
         comparison = px.strip(
             country_pool, x="country", y="WR-ELO", color="country",
-            hover_name="athlete_name",
+            hover_name="display_name",
             hover_data={"world_event_rank": True, "starts_365": True},
             title="Actual WR-ELO distribution of current participants",
         )
@@ -634,7 +649,7 @@ def render_progression(
     plot = cohort.dropna(subset=["age", "Global-ELO"])
     figure = px.scatter(
         plot, x="age", y="Global-ELO", color="Age group", symbol="gender",
-        hover_name="athlete_name",
+        hover_name="display_name",
         hover_data={"cnr_rank": True, "momentum": ":.1f", "country": True},
         title="Current Canadian pathway — one Open World-readiness scale",
     )
@@ -832,7 +847,7 @@ def render_focus_hypotheses(
             hypothesis = "Protect the improving training process; add WR starts selectively rather than chasing participation volume."
         else:
             hypothesis = "Prioritize raising repeatable performance; choose competitions that answer a specific readiness question."
-        rows.append({"Athlete": athlete["athlete_name"], "Working hypothesis": hypothesis})
+        rows.append({"Athlete": friendly_name(athlete["athlete_name"]), "Working hypothesis": hypothesis})
     if rows:
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.caption("These are transparent decision hypotheses from rating level, recent change and WR exposure—not causal training prescriptions.")
@@ -848,7 +863,7 @@ def render_olympics(
     focus = selected_rows(athletes, selected)
     columns = st.columns(max(1, min(3, len(focus))))
     for column, (_, athlete) in zip(columns, focus.iterrows()):
-        column.markdown(f"#### {athlete['athlete_name']}")
+        column.markdown(f"#### {friendly_name(athlete['athlete_name'])}")
         column.metric("Global-ELO", f"{athlete.get('Global-ELO', np.nan):.0f}" if pd.notna(athlete.get("Global-ELO")) else "—")
         column.metric("IFSC-ELO", f"{athlete.get('IFSC-ELO', np.nan):.0f}" if pd.notna(athlete.get("IFSC-ELO")) else "—")
         column.metric("WR-ELO", f"{athlete.get('WR-ELO', np.nan):.0f}" if pd.notna(athlete.get("WR-ELO")) else "—")
@@ -858,7 +873,9 @@ def render_olympics(
         table = focus[[
             "athlete_name", "Global-ELO", "IFSC-ELO", "WR-ELO",
             "world_event_rank", "starts_365", "momentum",
-        ]].rename(columns={
+        ]].copy()
+        table["athlete_name"] = table["athlete_name"].map(friendly_name)
+        table = table.rename(columns={
             "athlete_name": "Athlete", "world_event_rank": "World Ranking",
             "starts_365": "WR starts / 365d", "momentum": "Global-ELO change / 365d",
         })
@@ -914,6 +931,7 @@ def top_ribbon(
                     "Main athlete" if index == 0 else f"Comparison {index + 1}",
                     names,
                     index=names.index(default),
+                    format_func=friendly_name,
                     key=f"athlete_{index}",
                 ))
         else:
@@ -940,7 +958,7 @@ def render_rating_detail(
         if focus.empty:
             st.caption("No matched rating evidence.")
             return
-        tabs = st.tabs([row["athlete_name"] for _, row in focus.iterrows()])
+        tabs = st.tabs([friendly_name(row["athlete_name"]) for _, row in focus.iterrows()])
         for tab, (_, athlete) in zip(tabs, focus.iterrows()):
             with tab:
                 metrics = st.columns(3)
@@ -1043,7 +1061,8 @@ def main() -> None:
     startup_status(data)
     if data["athletes"].empty:
         st.stop()
-    athletes = data["athletes"]
+    athletes = data["athletes"].copy()
+    athletes["display_name"] = athletes["athlete_name"].map(friendly_name)
     selected, _ = top_ribbon(athletes, data["history"], data["rosters"])
     if not selected:
         st.info("Select at least one athlete to begin.")
