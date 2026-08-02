@@ -49,6 +49,12 @@ descriptive and cannot isolate setting, training environment, attendance,
 travel or selection effects. See
 [the full contract](docs/BOULDER_RATING_FAMILY_CONTRACT.md).
 
+Repeated differences between frozen pre-event Elo and Performance-Elo are
+being evaluated as a separate, leakage-safe next-event form signal. The stable
+ledger remains unchanged until the challenger clears concentration and
+prospective-validation safeguards. See the
+[persistent performance-surprise specification](docs/PERSISTENT_PERFORMANCE_SURPRISE_SPEC.md).
+
 ## Run locally
 
 ```powershell
