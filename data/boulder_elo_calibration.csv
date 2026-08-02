@@ -1,0 +1,3 @@
+pool,calibration_season,calibration_competition,qualification_starts,semifinal_advances,events,native_elo_at_50pct_semifinal,normalization_offset,logistic_intercept_centered,logistic_slope_per_100_native_elo,display_anchor,meaning
+Boulder_Men,2025,IFSC Open World Cups,477,148,6,1704.5705789296844,295.4294210703156,-1.1581977785662074,1.5309415325757254,2000.0,2000 = fitted 50% probability of advancing from qualification to semifinal at a randomly sampled 2025 IFSC Open World Cup.
+Boulder_Women,2025,IFSC Open World Cups,381,146,6,1686.2144022083721,313.7855977916279,-0.8207941905266628,1.8372133697071489,2000.0,2000 = fitted 50% probability of advancing from qualification to semifinal at a randomly sampled 2025 IFSC Open World Cup.

@@ -37,6 +37,12 @@ uses non-para IFSC results; `WR-ELO` uses events in the current IFSC World
 Ranking window. Both provide Qualies, Semies and Finals specialists.
 `Performance-ELO` is one round's isolated level, never a stable athlete rating.
 
+All displayed families share an intuitive anchor: **2000 is the fitted 50%
+semifinal-advancement level at a randomly sampled 2025 IFSC Open World Cup**.
+It is estimated from pre-competition ratings and actual advancement, separately
+for the men's and women's pools. The translation does not change athlete order,
+spacing or historical updates.
+
 Specialists require at least two eligible contests and shrink toward
 `Global-ELO` while evidence is limited. Correlations with `WR-ELO` are
 descriptive and cannot isolate setting, training environment, attendance,

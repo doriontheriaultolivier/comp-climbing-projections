@@ -12,6 +12,20 @@ athletes therefore do not have separate scales. Men and women retain separate
 competition ledgers because they compete on different terrain, but the same
 model and display scale are used.
 
+## Interpretable 2000 anchor
+
+On the displayed scale, **2000 means a fitted 50% chance of advancing from
+qualification to semifinal at a randomly sampled 2025 IFSC Open World Cup**,
+within the athlete's gender pool and assuming participation. The anchor is fit
+from ratings frozen before each competition and the observed advancement
+outcome: 477 men's starts and 381 women's starts across six World Cups per
+pool. The native 50% thresholds were 1704.6 for men and 1686.2 for women, so
+the release adds +295.4 and +313.8 respectively.
+
+This is a display translation, not an extra model update. It changes neither
+athlete order nor spacing, and it does not mean every athlete at 2000 has
+exactly 50% odds in every venue: field, setting and current form still matter.
+
 | Display name | Eligible evidence |
 |---|---|
 | Global-ELO | All de-duplicated local, national, international, youth and senior Boulder rounds |
@@ -33,7 +47,11 @@ procedure specialist.
 ## Sparse-evidence rule
 
 Raw specialist ledgers start at the same mathematical origin as Global-ELO,
-then are aligned to the current Global scale within each competition pool. The
+then map directly onto the current Global scale within each competition pool
+using `Global = intercept + slope × raw specialist`. The previous inverse
+regression compressed sparse WR ledgers and produced an artificial downward
+shift, especially in the women's pool. Direct mapping removes that pool-level
+bias. The
 displayed specialist difference from Global-ELO is proportional to eligible
 evidence. This prevents two distortions:
 

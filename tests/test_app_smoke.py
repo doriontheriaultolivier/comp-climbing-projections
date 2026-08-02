@@ -23,6 +23,29 @@ class AppSmokeTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(app.get("plotly_chart")), 2)
 
+    def test_pool_views_and_format_transform(self) -> None:
+        app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
+        app.run(timeout=120)
+
+        round_format = next(
+            item for item in app.selectbox if item.label == "Round format"
+        )
+        round_format.select("Onsight").run(timeout=120)
+        self.assertFalse(app.exception)
+        self.assertEqual(
+            next(item for item in app.selectbox if item.label == "Round format").value,
+            "Onsight",
+        )
+
+        for section in ["IFSC Pool", "WR Pool"]:
+            overview = next(
+                item for item in app.segmented_control
+                if item.label == "Overview section"
+            )
+            overview.set_value(section).run(timeout=120)
+            self.assertFalse(app.exception, section)
+            self.assertIn(section, [item.value for item in app.subheader])
+
 
 if __name__ == "__main__":
     unittest.main()

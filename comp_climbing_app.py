@@ -21,6 +21,7 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 RATING_ORDER = ["Global-ELO", "IFSC-ELO", "WR-ELO"]
+FORMAT_OPTIONS = ["All formats", "Onsight", "Flash", "Scramble"]
 ALL_RATINGS = [
     "Global-ELO", "Global-ELO-Onsight", "Global-ELO-Scramble",
     "Global-ELO-Flash", "WR-ELO", "WR-ELO-Qualies", "WR-ELO-Semies",
@@ -76,6 +77,7 @@ def read_data() -> dict[str, pd.DataFrame]:
         "athletes": ("boulder_overview_athletes.parquet", "parquet"),
         "history": ("boulder_overview_history.parquet", "parquet"),
         "correlations": ("boulder_rating_correlations.csv", "csv"),
+        "calibration": ("boulder_elo_calibration.csv", "csv"),
         "rosters": ("program_rosters.csv", "csv"),
     }
     output: dict[str, pd.DataFrame] = {}
@@ -288,6 +290,10 @@ def selected_rows(athletes: pd.DataFrame, names: list[str]) -> pd.DataFrame:
 
 def rating_help() -> str:
     return (
+        "Every displayed family uses the same anchor: 2000 means a fitted 50% "
+        "chance of reaching a semifinal at a randomly sampled 2025 IFSC Open "
+        "World Cup, within the athlete's gender pool. This shifts the scale for "
+        "interpretation without changing athlete order or model updates. "
         "Global-ELO uses every de-duplicated Boulder result on one Open World-Cup "
         "readiness scale. IFSC-ELO uses IFSC results only. WR-ELO uses only events "
         "that award IFSC World Ranking points. Specialist ratings are shown only "
@@ -295,6 +301,26 @@ def rating_help() -> str:
         "evidence is limited. Performance-ELO is one round's isolated level, not "
         "the athlete's stable rating."
     )
+
+
+def rating_transform_controls(key: str, default: str) -> str:
+    columns = st.columns([1.55, 1])
+    family = columns[0].segmented_control(
+        "Rating evidence", RATING_ORDER, default=default,
+        help=rating_help(), key=f"{key}_family",
+    )
+    format_name = columns[1].selectbox(
+        "Round format", FORMAT_OPTIONS, index=0,
+        disabled=family != "Global-ELO",
+        help=(
+            "Format-specific ratings are available for the Global evidence pool. "
+            "IFSC and WR transformations already describe a narrower event pool."
+        ),
+        key=f"{key}_format",
+    )
+    if family == "Global-ELO" and format_name != "All formats":
+        return f"Global-ELO-{format_name}"
+    return family
 
 
 def correlation_note(
@@ -329,16 +355,13 @@ def add_selected_highlight(
         figure.add_trace(
             go.Scatter(
                 x=[row[x]], y=[row[y]], mode="markers+text",
-                text=[friendly_name(row["athlete_name"])], textposition="top center",
+                text=[friendly_name(row["athlete_name"])], textposition="top left",
                 marker={
-                    "size": 18, "color": PALETTE["gold"],
-                    "line": {"width": 3, "color": PALETTE["ink"]},
+                    "size": 14, "color": "rgba(0,0,0,0)",
+                    "line": {"width": 2, "color": "#36524E"},
                     "symbol": "diamond" if row.get("gender") == "Women" else "circle",
                 },
-                hovertemplate=(
-                    f"<b>{friendly_name(row['athlete_name'])}</b><br>{y}: %{{y:.0f}}"
-                    f"<br>{x}: %{{x:.1f}}<extra></extra>"
-                ),
+                hoverinfo="skip",
                 showlegend=False,
             )
         )
@@ -351,6 +374,8 @@ def displacement_lines(
     x: str,
 ) -> None:
     transitions = []
+    if stage.startswith("Global-ELO-"):
+        transitions.append(("Global-ELO", stage, "#9AA7A4"))
     if stage in {"IFSC-ELO", "WR-ELO"}:
         transitions.append(("Global-ELO", "IFSC-ELO", "#9AA7A4"))
     if stage == "WR-ELO":
@@ -380,8 +405,51 @@ def pool_scatter(
         return go.Figure().update_layout(title="No matched ratings for this view")
     if "display_name" not in plot:
         plot["display_name"] = plot["athlete_name"].map(friendly_name)
-    plot["Last result"] = plot.get("days_since_last_result", np.nan)
-    plot["Momentum"] = plot["momentum"].round(1)
+    country = (
+        plot.get("country", pd.Series("", index=plot.index))
+        .fillna("").astype(str).str.upper()
+    )
+    country_codes = {
+        "CANADA": "CAN", "UNITED STATES": "USA", "FRANCE": "FRA",
+        "AUSTRALIA": "AUS", "JAPAN": "JPN", "GREAT BRITAIN": "GBR",
+        "UNITED KINGDOM": "GBR", "GERMANY": "GER", "ITALY": "ITA",
+        "SLOVENIA": "SLO", "AUSTRIA": "AUT", "SWITZERLAND": "SUI",
+    }
+    plot["country_code"] = country.map(country_codes).fillna(country.str.slice(0, 3))
+    age = pd.to_numeric(
+        plot.get("age", pd.Series(np.nan, index=plot.index)), errors="coerce"
+    )
+    uncertainty_days = pd.to_numeric(
+        plot.get(
+            "birth_date_uncertainty_days", pd.Series(np.nan, index=plot.index)
+        ),
+        errors="coerce",
+    )
+    plot["age_hover"] = [
+        f"{value:.1f} ± {uncertainty / 365.2425:.1f} years"
+        if np.isfinite(value) and np.isfinite(uncertainty)
+        else (f"{value:.1f} years" if np.isfinite(value) else "Unknown")
+        for value, uncertainty in zip(age, uncertainty_days)
+    ]
+    days = pd.to_numeric(
+        plot.get("days_since_last_result", pd.Series(np.nan, index=plot.index)),
+        errors="coerce",
+    )
+    plot["days_hover"] = [
+        (
+            f"{'🔴' if value > 180 else '🟠' if value > 90 else '🟢'} "
+            f"{int(value)} days"
+        ) if np.isfinite(value) else "Unknown"
+        for value in days
+    ]
+    evidence_column = f"{rating} evidence"
+    evidence = pd.to_numeric(
+        plot.get(evidence_column, pd.Series(np.nan, index=plot.index)), errors="coerce"
+    )
+    plot["rounds_hover"] = evidence.fillna(0).astype(int)
+    plot["momentum_hover"] = plot["momentum"].map(
+        lambda value: f"{value:+.1f} Global-ELO / 365d"
+    )
     figure = px.scatter(
         plot,
         x=x,
@@ -391,15 +459,23 @@ def pool_scatter(
         color_continuous_midpoint=0,
         symbol="gender",
         hover_name="display_name",
-        hover_data={
-            "country": True, "momentum": ":.1f",
-            "days_since_last_result": True, x: ":.1f", rating: ":.0f",
-            "birth_date_confidence": True,
-            "birth_date_uncertainty_days": True,
-        },
+        custom_data=[
+            "country_code", "momentum_hover", "age_hover", "days_hover",
+            "rounds_hover", "display_name",
+        ],
         title=title,
     )
-    figure.update_traces(marker={"size": 9, "opacity": 0.68})
+    figure.update_traces(
+        marker={"size": 9, "opacity": 0.72},
+        hovertemplate=(
+            "<b>%{customdata[5]} (%{customdata[0]})</b><br>"
+            f"{rating}: %{{y:,.0f}}<br>"
+            "Momentum: %{customdata[1]}<br>"
+            "Age: %{customdata[2]}<br>"
+            "Last result: %{customdata[3]}<br>"
+            "Included rounds: %{customdata[4]}<extra></extra>"
+        ),
+    )
     if canadian_outline and "country" in plot:
         canadians = plot.loc[plot["country"].astype(str).str.upper().eq("CAN")]
         figure.add_trace(
@@ -412,14 +488,32 @@ def pool_scatter(
     displacement_lines(figure, plot, rating, x)
     add_selected_highlight(figure, plot, selected, x, rating)
     figure.update_layout(
-        height=580,
-        margin={"l": 20, "r": 20, "t": 70, "b": 20},
-        legend_title_text="Gender",
-        coloraxis_colorbar_title="Global-ELO<br>change / 365d",
+        height=610,
+        margin={"l": 88, "r": 36, "t": 76, "b": 138},
+        legend={
+            "title": {"text": "Gender"}, "orientation": "h",
+            "x": 0, "xanchor": "left", "y": -0.18, "yanchor": "top",
+        },
+        coloraxis_colorbar={
+            "title": {"text": "Momentum · Global-ELO / 365d", "side": "top"},
+            "orientation": "h", "x": 1, "xanchor": "right",
+            "y": -0.25, "yanchor": "top", "len": 0.46, "thickness": 12,
+            "nticks": 3, "tickangle": 0,
+        },
         hovermode="closest",
     )
-    figure.update_xaxes(title=x.replace("_", " ").title())
-    figure.update_yaxes(title=rating, gridcolor="#E5ECEA")
+    x_titles = {
+        "cnr_rank": "CNR rank", "age": "Age (years)",
+        "ifsc_rank": "IFSC-ELO rank", "world_event_rank": "IFSC World Ranking",
+    }
+    figure.update_xaxes(
+        title={"text": x_titles.get(x, x.replace("_", " ").title()), "standoff": 16},
+        tickformat=",.0f", separatethousands=True, automargin=True,
+    )
+    figure.update_yaxes(
+        title={"text": rating, "standoff": 12}, gridcolor="#E5ECEA",
+        tickformat=",.0f", separatethousands=True, automargin=True,
+    )
     return figure
 
 
@@ -480,16 +574,12 @@ def render_canadian_pool(
     st.subheader("Canadian Pool")
     st.caption("Where every current Canadian CNR athlete sits, and what changes when the evidence becomes more competition-specific.")
     canadian = athletes.loc[athletes["cnr_rank"].notna()].copy()
-    controls = st.columns([1, 1])
-    x_choice = controls[0].segmented_control(
+    x_choice = st.segmented_control(
         "Horizontal axis", ["CNR rank", "Age"], default="CNR rank",
         help="CNR rank compares current Canadian ranking position. Age compares pathway timing.",
         key="canadian_x",
     )
-    stage = controls[1].segmented_control(
-        "Transform ratings", RATING_ORDER, default="Global-ELO",
-        help=rating_help(), key="canadian_stage",
-    )
+    stage = rating_transform_controls("canadian", "Global-ELO")
     x = "cnr_rank" if x_choice == "CNR rank" else "age"
     figure = pool_scatter(
         canadian, x, stage, selected,
@@ -529,14 +619,10 @@ def render_ifsc_pool(
         | athletes["cnr_rank"].notna()
     ].copy()
     pool["ifsc_rank"] = pool.groupby("pool")["IFSC-ELO"].rank(ascending=False, method="min")
-    controls = st.columns(2)
-    x_choice = controls[0].segmented_control(
+    x_choice = st.segmented_control(
         "Horizontal axis", ["IFSC rank", "Age"], default="Age", key="ifsc_x"
     )
-    stage = controls[1].segmented_control(
-        "Transform ratings", RATING_ORDER, default="IFSC-ELO",
-        help=rating_help(), key="ifsc_stage",
-    )
+    stage = rating_transform_controls("ifsc", "IFSC-ELO")
     x = "ifsc_rank" if x_choice == "IFSC rank" else "age"
     figure = pool_scatter(
         pool, x, stage, selected,
@@ -564,10 +650,7 @@ def render_wr_pool(
             & athletes["starts_365"].fillna(0).gt(0)
         )
     ].copy()
-    stage = st.segmented_control(
-        "Transform ratings", RATING_ORDER, default="WR-ELO",
-        help=rating_help(), key="wr_stage",
-    )
+    stage = rating_transform_controls("wr", "WR-ELO")
     figure = pool_scatter(
         pool, "world_event_rank", stage, selected,
         f"World Ranking pool — {stage}", canadian_outline=True,
@@ -713,7 +796,10 @@ def semi_probability_reference(
 ) -> float:
     if history.empty:
         return np.nan
-    recent_cutoff = pd.to_datetime(history["event_date"], errors="coerce").max() - pd.Timedelta(days=365)
+    latest_date = pd.Timestamp(
+        pd.to_datetime(history["event_date"], errors="coerce").max()
+    )
+    recent_cutoff = latest_date - pd.Timedelta(days=365)
     starts = history.loc[
         history["source_scope"].eq("IFSC")
         & history["round_group"].eq("Qualification")
@@ -1036,6 +1122,15 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
             st.success(
                 f"Ready · {len(data['athletes']):,} Boulder athletes · results through {latest:%Y-%m-%d}."
             )
+            calibration = data.get("calibration", pd.DataFrame())
+            if not calibration.empty:
+                starts = int(calibration["qualification_starts"].sum())
+                events = int(calibration["events"].sum())
+                st.caption(
+                    f"Display scale checked: 2000 is the fitted 50% semifinal level "
+                    f"from {starts:,} pre-event athlete-starts across {events} "
+                    "gender-pool World Cup samples in 2025."
+                )
         st.caption("Duplicate controls run before the rating build. Missing specialist evidence is withheld rather than silently replaced.")
 
 
