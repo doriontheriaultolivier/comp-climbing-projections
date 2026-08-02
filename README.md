@@ -8,6 +8,9 @@ This is the focused successor to
 The [former live application](https://ifsc-performance-projections.streamlit.app/)
 stays available as a frozen comparison and rollback release.
 
+**Live Boulder product:**
+[comp-climbing-projections.streamlit.app](https://comp-climbing-projections.streamlit.app/)
+
 ## What the Overview answers
 
 - **Canadian Pool:** where every matched CNR athlete sits on Global, IFSC and
