@@ -1236,6 +1236,15 @@ def main() -> None:
             "- **IFSC-ELO-Qualies / Semies / Finals:** only the named round of non-para IFSC events.\n"
             "- **Performance-ELO:** the isolated level shown in one round, calculated from ratings frozen before the event."
         )
+        st.markdown(
+            "**Why one exceptional Performance-ELO does not automatically accelerate Elo.** "
+            "One result can reflect real improvement, but also terrain fit and ordinary event noise. "
+            "The tested one-state dynamic challenger became slightly better at ordering fields but "
+            "worse at forecasting advancement probabilities after multi-round and cross-discipline "
+            "dependence were corrected. Production therefore keeps the uncertainty-sensitive, "
+            "zero-sum Elo. A future current-shape layer must first show repeated surprise across "
+            "independent competitions and improve frozen next-event forecasts."
+        )
 
 
 if __name__ == "__main__":
