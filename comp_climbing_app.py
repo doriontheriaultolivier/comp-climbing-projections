@@ -614,11 +614,17 @@ def render_progression(
     ].copy()
     if not history.empty:
         dates = pd.to_datetime(history["event_date"], errors="coerce")
-        finalists = history.loc[
+        canadian_youth_event = (
             history["source_scope"].eq("CEC")
-            & history["event_name"].astype(str).str.contains("Youth National", case=False, na=False)
+            & history["event_name"].astype(str).str.contains(
+                "Youth National", case=False, na=False
+            )
+        )
+        latest_canadian_youth = dates.loc[canadian_youth_event].max()
+        finalists = history.loc[
+            canadian_youth_event
             & history["round_group"].eq("Final")
-            & dates.eq(dates.loc[history["event_name"].astype(str).str.contains("Youth National", case=False, na=False)].max())
+            & dates.eq(latest_canadian_youth)
         ]
         cohort = pd.concat(
             [cohort, athletes.loc[athletes["global_id"].isin(finalists["global_id"])]],
