@@ -104,6 +104,9 @@ def wide_athletes(ratings: pd.DataFrame, history: pd.DataFrame) -> pd.DataFrame:
         values="rating",
         aggfunc="first",
     ).reset_index()
+    for family in ALL_RATINGS:
+        if family not in values:
+            values[family] = np.nan
     evidence = ratings.pivot_table(
         index=index,
         columns="rating_family",
@@ -293,12 +296,15 @@ def rating_help() -> str:
         "Every displayed family uses the same anchor: 2000 means a fitted 50% "
         "chance of reaching a semifinal at a randomly sampled 2025 IFSC Open "
         "World Cup, within the athlete's gender pool. This shifts the scale for "
-        "interpretation without changing athlete order or model updates. "
+        "interpretation without changing athlete order or model updates. Dashed "
+        "final, podium and win lines are fitted from the same frozen 2025 "
+        "athlete-starts; they are historical references, not current 2026 odds. "
         "Global-ELO uses every de-duplicated Boulder result on one Open World-Cup "
         "readiness scale. IFSC-ELO uses IFSC results only. WR-ELO uses only events "
         "that award IFSC World Ranking points. Specialist ratings are shown only "
-        "with at least two eligible rounds and shrink toward Global-ELO while "
-        "evidence is limited. Performance-ELO is one round's isolated level, not "
+        "with at least two eligible rounds and enough athletes to calibrate the "
+        "family; they shrink toward Global-ELO while evidence is limited. "
+        "Performance-ELO is one round's isolated level, not "
         "the athlete's stable rating."
     )
 
@@ -351,11 +357,16 @@ def add_selected_highlight(
     y: str,
 ) -> None:
     focus = selected_rows(frame, selected).dropna(subset=[x, y])
-    for _, row in focus.iterrows():
+    order = {plain_key(name): index for index, name in enumerate(selected)}
+    focus["_selection_order"] = focus["athlete_name"].map(
+        lambda name: order.get(plain_key(name), len(order))
+    )
+    focus = focus.sort_values("_selection_order")
+    offsets = [(-58, -34), (-68, 18), (-54, 42)]
+    for position, (_, row) in enumerate(focus.iterrows()):
         figure.add_trace(
             go.Scatter(
-                x=[row[x]], y=[row[y]], mode="markers+text",
-                text=[friendly_name(row["athlete_name"])], textposition="top left",
+                x=[row[x]], y=[row[y]], mode="markers",
                 marker={
                     "size": 14, "color": "rgba(0,0,0,0)",
                     "line": {"width": 2, "color": "#36524E"},
@@ -364,6 +375,14 @@ def add_selected_highlight(
                 hoverinfo="skip",
                 showlegend=False,
             )
+        )
+        ax, ay = offsets[position % len(offsets)]
+        figure.add_annotation(
+            x=row[x], y=row[y], text=friendly_name(row["athlete_name"]),
+            showarrow=True, arrowhead=0, arrowwidth=1,
+            arrowcolor="rgba(54,82,78,0.52)", ax=ax, ay=ay,
+            font={"size": 12, "color": PALETTE["ink"]},
+            bgcolor="rgba(255,255,255,0.62)", borderpad=2,
         )
 
 
@@ -392,6 +411,42 @@ def displacement_lines(
             )
 
 
+def outcome_threshold(
+    calibration: pd.DataFrame, outcome: str, pool: str = "Boulder_All"
+) -> float:
+    column = f"display_elo_at_50pct_{outcome}"
+    if calibration.empty or column not in calibration:
+        return np.nan
+    matched = calibration.loc[calibration["pool"].eq(pool), column]
+    if matched.notna().any():
+        return float(matched.dropna().iloc[0])
+    pool_rows = calibration.loc[
+        calibration["pool"].isin(["Boulder_Men", "Boulder_Women"]), column
+    ]
+    return float(pool_rows.mean()) if pool_rows.notna().any() else np.nan
+
+
+def add_outcome_thresholds(
+    figure: go.Figure, calibration: pd.DataFrame
+) -> None:
+    styles = [
+        ("semifinal", "50% semifinal", "rgba(11,122,117,0.42)"),
+        ("final", "50% final", "rgba(66,133,169,0.42)"),
+        ("podium", "50% podium", "rgba(230,162,60,0.48)"),
+        ("win", "50% win", "rgba(242,107,91,0.46)"),
+    ]
+    for outcome, label, color in styles:
+        level = outcome_threshold(calibration, outcome)
+        if not np.isfinite(level):
+            continue
+        figure.add_hline(
+            y=level, line_dash="dash", line_width=1, line_color=color,
+            annotation_text=f"{label} · 2025",
+            annotation_position="top left",
+            annotation_font={"size": 10, "color": color.replace("0.4", "0.9")},
+        )
+
+
 def pool_scatter(
     frame: pd.DataFrame,
     x: str,
@@ -399,6 +454,7 @@ def pool_scatter(
     selected: list[str],
     title: str,
     canadian_outline: bool = False,
+    calibration: pd.DataFrame | None = None,
 ) -> go.Figure:
     plot = frame.dropna(subset=[x, rating]).copy()
     if plot.empty:
@@ -487,6 +543,9 @@ def pool_scatter(
         )
     displacement_lines(figure, plot, rating, x)
     add_selected_highlight(figure, plot, selected, x, rating)
+    add_outcome_thresholds(
+        figure, calibration if calibration is not None else pd.DataFrame()
+    )
     figure.update_layout(
         height=610,
         margin={"l": 88, "r": 36, "t": 76, "b": 138},
@@ -570,6 +629,7 @@ def render_canadian_pool(
     athletes: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
+    calibration: pd.DataFrame,
 ) -> None:
     st.subheader("Canadian Pool")
     st.caption("Where every current Canadian CNR athlete sits, and what changes when the evidence becomes more competition-specific.")
@@ -584,6 +644,7 @@ def render_canadian_pool(
     figure = pool_scatter(
         canadian, x, stage, selected,
         f"Canadian CNR athletes — {stage}",
+        calibration=calibration,
     )
     if x == "cnr_rank":
         figure.update_xaxes(autorange="reversed")
@@ -600,6 +661,7 @@ def render_ifsc_pool(
     history: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
+    calibration: pd.DataFrame,
 ) -> None:
     st.subheader("IFSC Pool")
     st.caption("Canadians beside every 2025–2026 IFSC Boulder finalist; a black ring identifies Canada.")
@@ -628,6 +690,7 @@ def render_ifsc_pool(
         pool, x, stage, selected,
         f"Canadian CNR athletes and recent IFSC finalists — {stage}",
         canadian_outline=True,
+        calibration=calibration,
     )
     if x == "ifsc_rank":
         figure.update_xaxes(autorange="reversed")
@@ -640,6 +703,7 @@ def render_wr_pool(
     athletes: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
+    calibration: pd.DataFrame,
 ) -> None:
     st.subheader("WR Pool")
     st.caption("The current World Ranking top 40 plus every Canadian with a World Ranking start in the last 365 days.")
@@ -654,6 +718,7 @@ def render_wr_pool(
     figure = pool_scatter(
         pool, "world_event_rank", stage, selected,
         f"World Ranking pool — {stage}", canadian_outline=True,
+        calibration=calibration,
     )
     figure.update_xaxes(autorange="reversed", title="Current IFSC World Ranking")
     st.plotly_chart(figure, width="stretch", theme=None)
@@ -680,6 +745,7 @@ def render_wr_pool(
             title="Actual WR-ELO distribution of current participants",
         )
         comparison.update_traces(marker={"size": 10, "opacity": 0.65})
+        add_outcome_thresholds(comparison, calibration)
         comparison.update_layout(height=430, showlegend=False)
         st.plotly_chart(comparison, width="stretch", theme=None)
 
@@ -703,6 +769,7 @@ def render_progression(
     history: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
+    calibration: pd.DataFrame,
 ) -> None:
     st.subheader("Global progression")
     st.caption("Compare athletes at the same age, then separate current level from the direction of travel.")
@@ -744,8 +811,8 @@ def render_progression(
         value=True,
         help=(
             "Shows the mean Global-ELO of current CNR top-five athletes by age "
-            "band and the current IFSC-ELO level near a 50% semifinal rate. "
-            "These are descriptive references, not selection standards."
+            "band. Outcome references remain visible because they define the "
+            "shared 2025 interpretation scale."
         ),
     )
     if show_lines:
@@ -765,19 +832,14 @@ def render_progression(
                         "width": 3, "dash": "dot",
                     },
                 ))
-        for gender, pool_name in (("Men", "Boulder_Men"), ("Women", "Boulder_Women")):
-            semi_level = semi_probability_reference(history, athletes, pool_name)
-            if np.isfinite(semi_level):
-                figure.add_hline(
-                    y=semi_level, line_dash="dash",
-                    line_color=PALETTE["coral"] if gender == "Men" else PALETTE["gold"],
-                    annotation_text=f"Current IFSC ~50% semifinal — {gender}",
-                )
+    add_outcome_thresholds(figure, calibration)
     figure.update_layout(height=570, margin={"l": 20, "r": 20, "t": 70, "b": 20})
     st.plotly_chart(figure, width="stretch", theme=None)
     st.info(compare_text(cohort, selected, "Global-ELO", "Progression"), icon="↗️")
 
-    projection_figure = progression_projection(athletes, history, selected)
+    projection_figure = progression_projection(
+        athletes, history, selected, calibration
+    )
     st.plotly_chart(projection_figure, width="stretch", theme=None)
     st.caption(
         "Projection rate = 65% of the athlete's bounded recent Global-ELO "
@@ -785,57 +847,15 @@ def render_progression(
         "the same age and gender. It assumes the trend continues; it is not a "
         "training-effect claim."
     )
-    render_focus_hypotheses(athletes, history, selected)
+    render_focus_hypotheses(athletes, history, selected, calibration)
     st.caption(correlation_note(correlations, "Global-ELO"))
 
 
-def semi_probability_reference(
-    history: pd.DataFrame,
-    athletes: pd.DataFrame,
-    pool: str | None = None,
-) -> float:
-    if history.empty:
-        return np.nan
-    latest_date = pd.Timestamp(
-        pd.to_datetime(history["event_date"], errors="coerce").max()
-    )
-    recent_cutoff = latest_date - pd.Timedelta(days=365)
-    starts = history.loc[
-        history["source_scope"].eq("IFSC")
-        & history["round_group"].eq("Qualification")
-        & pd.to_datetime(history["event_date"], errors="coerce").ge(recent_cutoff)
-    ].copy()
-    if pool:
-        starts = starts.loc[starts["pool"].eq(pool)]
-    if starts.empty:
-        return np.nan
-    semis = history.loc[
-        history["source_scope"].eq("IFSC")
-        & history["round_group"].eq("Semi-final")
-        & pd.to_datetime(history["event_date"], errors="coerce").ge(recent_cutoff)
-    ]
-    advanced_keys = set(zip(
-        semis["source_event_id"].astype(str),
-        semis["pool"].astype(str),
-        semis["global_id"].astype(str),
-    ))
-    starts["advanced"] = [
-        (str(event), str(athlete_pool), str(athlete)) in advanced_keys
-        for event, athlete_pool, athlete in zip(
-            starts["source_event_id"], starts["pool"], starts["global_id"]
-        )
-    ]
-    current = athletes[["pool", "global_id", "IFSC-ELO"]]
-    starts = starts.merge(current, on=["pool", "global_id"], how="left").dropna(subset=["IFSC-ELO"])
-    if starts.empty:
-        return np.nan
-    bands = starts.assign(band=(starts["IFSC-ELO"] / 50).round() * 50).groupby("band")["advanced"].agg(["mean", "count"])
-    bands = bands.loc[bands["count"].ge(8)]
-    return float((bands["mean"] - 0.5).abs().idxmin()) if not bands.empty else np.nan
-
-
 def progression_projection(
-    athletes: pd.DataFrame, history: pd.DataFrame, selected: list[str]
+    athletes: pd.DataFrame,
+    history: pd.DataFrame,
+    selected: list[str],
+    calibration: pd.DataFrame,
 ) -> go.Figure:
     figure = go.Figure()
     focus = selected_rows(athletes, selected)
@@ -879,6 +899,7 @@ def progression_projection(
             line={"color": "rgba(0,0,0,0)"}, hoverinfo="skip", showlegend=False,
         ))
     figure.add_vline(x=as_of.timestamp() * 1000, line_dash="dash", line_color="#555", annotation_text="Now")
+    add_outcome_thresholds(figure, calibration)
     figure.update_layout(
         title="Observed Global-ELO and a 12-month bounded-trend hypothesis",
         height=500, yaxis_title="Global-ELO", xaxis_title="Event date",
@@ -928,13 +949,16 @@ def typical_age_progression(history: pd.DataFrame) -> dict[tuple[str, int], floa
 
 
 def render_focus_hypotheses(
-    athletes: pd.DataFrame, history: pd.DataFrame, selected: list[str]
+    athletes: pd.DataFrame,
+    history: pd.DataFrame,
+    selected: list[str],
+    calibration: pd.DataFrame,
 ) -> None:
     focus = selected_rows(athletes, selected)
     rows = []
     for _, athlete in focus.iterrows():
         global_elo = athlete.get("Global-ELO", np.nan)
-        semi = semi_probability_reference(history, athletes, athlete.get("pool"))
+        semi = outcome_threshold(calibration, "semifinal", athlete.get("pool"))
         wr_starts = athlete.get("starts_365", np.nan)
         momentum = athlete.get("momentum", 0.0)
         if pd.isna(global_elo):
@@ -1124,8 +1148,10 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
             )
             calibration = data.get("calibration", pd.DataFrame())
             if not calibration.empty:
-                starts = int(calibration["qualification_starts"].sum())
-                events = int(calibration["events"].sum())
+                combined = calibration.loc[calibration["pool"].eq("Boulder_All")]
+                counted = combined if not combined.empty else calibration
+                starts = int(counted["qualification_starts"].sum())
+                events = int(counted["events"].sum())
                 st.caption(
                     f"Display scale checked: 2000 is the fitted 50% semifinal level "
                     f"from {starts:,} pre-event athlete-starts across {events} "
@@ -1184,10 +1210,20 @@ def main() -> None:
         label_visibility="collapsed",
     )
     renderers = {
-        "Canadian Pool": lambda: render_canadian_pool(athletes, selected, data["correlations"]),
-        "IFSC Pool": lambda: render_ifsc_pool(athletes, data["history"], selected, data["correlations"]),
-        "WR Pool": lambda: render_wr_pool(athletes, selected, data["correlations"]),
-        "Global progression": lambda: render_progression(athletes, data["history"], selected, data["correlations"]),
+        "Canadian Pool": lambda: render_canadian_pool(
+            athletes, selected, data["correlations"], data["calibration"]
+        ),
+        "IFSC Pool": lambda: render_ifsc_pool(
+            athletes, data["history"], selected, data["correlations"],
+            data["calibration"],
+        ),
+        "WR Pool": lambda: render_wr_pool(
+            athletes, selected, data["correlations"], data["calibration"]
+        ),
+        "Global progression": lambda: render_progression(
+            athletes, data["history"], selected, data["correlations"],
+            data["calibration"],
+        ),
         "Towards Olympics": lambda: render_olympics(athletes, selected, data["correlations"]),
     }
     renderers[section]()

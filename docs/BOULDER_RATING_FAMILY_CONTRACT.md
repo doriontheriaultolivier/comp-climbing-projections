@@ -26,6 +26,14 @@ This is a display translation, not an extra model update. It changes neither
 athlete order nor spacing, and it does not mean every athlete at 2000 has
 exactly 50% odds in every venue: field, setting and current form still matter.
 
+The light dashed chart references use the same frozen 2025 World Cup starts.
+After translating both gender pools onto the common semifinal anchor, the
+cross-pool fitted 50% reference levels are approximately 2000 for a semifinal,
+2156 for a final, 2257 for a podium and 2398 for a win. The last three are
+descriptive extrapolations from only 88 finalists, 33 podium athletes and 11
+winners. They must not be read as current 2026 probabilities or hard selection
+cutoffs. The app labels them with “2025” for this reason.
+
 | Display name | Eligible evidence |
 |---|---|
 | Global-ELO | All de-duplicated local, national, international, youth and senior Boulder rounds |
@@ -63,6 +71,12 @@ Fewer than two eligible contests produces no displayed specialist rating.
 Evidence status is Provisional at 2–3 contests, Developing at 4–7 and
 Established at 8 or more. These labels describe the quantity of rating
 evidence, not the quality of the athlete.
+
+A specialist family is also withheld when fewer than 20 athletes with at least
+three eligible contests can calibrate its raw ledger onto the Global scale.
+This currently affects Global-ELO-Scramble and WR-ELO-Finals. Showing their raw
+1500-centred values would recreate an artificial 100+ point location penalty;
+missing is more honest until a governed hierarchical calibration is tested.
 
 ## What correlations can and cannot say
 

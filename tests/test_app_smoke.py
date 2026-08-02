@@ -1,7 +1,11 @@
 from pathlib import Path
 import unittest
 
+import pandas as pd
+import plotly.graph_objects as go
 from streamlit.testing.v1 import AppTest
+
+from comp_climbing_app import add_outcome_thresholds
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +40,10 @@ class AppSmokeTests(unittest.TestCase):
             next(item for item in app.selectbox if item.label == "Round format").value,
             "Onsight",
         )
+        next(
+            item for item in app.selectbox if item.label == "Round format"
+        ).select("Scramble").run(timeout=120)
+        self.assertFalse(app.exception)
 
         for section in ["IFSC Pool", "WR Pool"]:
             overview = next(
@@ -45,6 +53,15 @@ class AppSmokeTests(unittest.TestCase):
             overview.set_value(section).run(timeout=120)
             self.assertFalse(app.exception, section)
             self.assertIn(section, [item.value for item in app.subheader])
+
+    def test_four_governed_outcome_reference_lines(self) -> None:
+        calibration = pd.read_csv(ROOT / "data" / "boulder_elo_calibration.csv")
+        figure = go.Figure()
+        add_outcome_thresholds(figure, calibration)
+        self.assertEqual(len(figure.layout.shapes), 4)
+        levels = sorted(float(shape.y0) for shape in figure.layout.shapes)
+        self.assertAlmostEqual(levels[0], 2000.0, places=6)
+        self.assertTrue(levels == sorted(levels))
 
 
 if __name__ == "__main__":
