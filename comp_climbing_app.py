@@ -696,6 +696,12 @@ def render_progression(
 
     projection_figure = progression_projection(athletes, history, selected)
     st.plotly_chart(projection_figure, width="stretch", theme=None)
+    st.caption(
+        "Projection rate = 65% of the athlete's bounded recent Global-ELO "
+        "change + 35% of the median IFSC Performance-ELO change observed at "
+        "the same age and gender. It assumes the trend continues; it is not a "
+        "training-effect claim."
+    )
     render_focus_hypotheses(athletes, history, selected)
     st.caption(correlation_note(correlations, "Global-ELO"))
 
@@ -796,22 +802,28 @@ def progression_projection(
 
 
 def typical_age_progression(history: pd.DataFrame) -> dict[tuple[str, int], float]:
-    """Observed median annual change at each age; descriptive, not causal."""
+    """Median IFSC Performance-ELO change at each age; descriptive only."""
 
-    required = {"pool", "global_id", "event_date", "rating_after", "age_at_event"}
+    required = {
+        "pool", "global_id", "event_date", "performance_elo",
+        "age_at_event", "source_scope",
+    }
     if history.empty or not required.issubset(history.columns):
         return {}
-    rows = history.dropna(subset=["age_at_event", "rating_after", "event_date"]).copy()
+    rows = history.loc[history["source_scope"].eq("IFSC")].dropna(
+        subset=["age_at_event", "performance_elo", "event_date"]
+    ).copy()
     rows["age_year"] = pd.to_numeric(rows["age_at_event"], errors="coerce").round()
+    rows = rows.loc[rows["age_year"].between(12, 45)]
     rows = rows.sort_values("event_date")
     segments = (
         rows.groupby(["pool", "global_id", "age_year"], as_index=False)
         .agg(
             first_date=("event_date", "first"),
             last_date=("event_date", "last"),
-            first_rating=("rating_after", "first"),
-            last_rating=("rating_after", "last"),
-            observations=("rating_after", "size"),
+            first_rating=("performance_elo", "first"),
+            last_rating=("performance_elo", "last"),
+            observations=("performance_elo", "size"),
         )
     )
     segments["years"] = (
