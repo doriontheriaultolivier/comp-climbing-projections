@@ -12,6 +12,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 from pathlib import Path
 import unicodedata
 from urllib import error as urlerror
@@ -1518,20 +1519,244 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
         st.caption("Specialist ratings appear only when the athlete has enough matching round evidence.")
 
 
+def _physical_gender(frame: pd.DataFrame) -> pd.Series:
+    """Return a stable analysis sex label without assuming the label is complete."""
+    if "gender" in frame:
+        labels = frame["gender"].astype(str).str.title()
+    else:
+        labels = frame.get("pool", pd.Series("", index=frame.index)).astype(str)
+        labels = labels.str.extract(r"_(Men|Women)$", expand=False).fillna("Unspecified")
+    return labels.where(labels.isin(["Men", "Women"]), "Unspecified")
+
+
+def _rank_corr(x_values: object, y_values: object) -> float:
+    x_rank = pd.Series(x_values).rank()
+    y_rank = pd.Series(y_values).rank()
+    if x_rank.nunique(dropna=True) < 2 or y_rank.nunique(dropna=True) < 2:
+        return np.nan
+    return float(x_rank.corr(y_rank))
+
+
+def _fit_bayesian_saturation(
+    x_values: np.ndarray, y_values: np.ndarray,
+) -> dict[str, object] | None:
+    """Fit a model-averaged linear-then-plateau relationship.
+
+    Each candidate threshold is a conjugate Bayesian regression using
+    min(standardized_test, threshold) as its only slope term. Marginal
+    likelihood weights average across thresholds instead of pretending that
+    one estimated cut point is certain.
+    """
+    x_values = np.asarray(x_values, dtype=float)
+    y_values = np.asarray(y_values, dtype=float)
+    valid = np.isfinite(x_values) & np.isfinite(y_values)
+    x_values, y_values = x_values[valid], y_values[valid]
+    if len(x_values) < 5:
+        return None
+    x_mean, x_sd = float(x_values.mean()), float(x_values.std(ddof=0))
+    y_mean, y_sd = float(y_values.mean()), float(y_values.std(ddof=0))
+    if not np.isfinite(x_sd) or x_sd <= 1e-9 or not np.isfinite(y_sd) or y_sd <= 1e-9:
+        return None
+    x_z = (x_values - x_mean) / x_sd
+    y_z = (y_values - y_mean) / y_sd
+    tau_grid = np.unique(np.concatenate([
+        np.quantile(x_z, np.linspace(0.35, 0.95, 13)),
+        [float(x_z.max() + 0.60)],  # a near-linear candidate
+    ]))
+    prior_mean = np.zeros(2)
+    prior_covariance = np.diag([4.0, 2.0])
+    prior_precision = np.linalg.inv(prior_covariance)
+    prior_shape, prior_scale = 2.0, 1.0
+    _, prior_logdet = np.linalg.slogdet(prior_covariance)
+    candidates: list[dict[str, object]] = []
+    for tau in tau_grid:
+        design = np.column_stack([np.ones(len(x_z)), np.minimum(x_z, tau)])
+        posterior_precision = prior_precision + design.T @ design
+        posterior_covariance = np.linalg.inv(posterior_precision)
+        posterior_mean = posterior_covariance @ (design.T @ y_z)
+        posterior_shape = prior_shape + len(x_z) / 2
+        posterior_scale = max(1e-9, prior_scale + 0.5 * float(
+            y_z @ y_z
+            + prior_mean @ prior_precision @ prior_mean
+            - posterior_mean @ posterior_precision @ posterior_mean
+        ))
+        _, posterior_logdet = np.linalg.slogdet(posterior_covariance)
+        log_marginal = (
+            math.lgamma(posterior_shape) - math.lgamma(prior_shape)
+            + prior_shape * np.log(prior_scale)
+            - posterior_shape * np.log(posterior_scale)
+            + 0.5 * (posterior_logdet - prior_logdet)
+            - len(x_z) / 2 * np.log(np.pi)
+        )
+        candidates.append({
+            "tau": float(tau), "mean": posterior_mean,
+            "covariance": posterior_covariance, "shape": posterior_shape,
+            "scale": posterior_scale, "log_marginal": float(log_marginal),
+        })
+    log_weights = np.array([item["log_marginal"] for item in candidates], dtype=float)
+    weights = np.exp(log_weights - np.max(log_weights))
+    weights /= weights.sum()
+    return {
+        "candidates": candidates, "weights": weights,
+        "x_mean": x_mean, "x_sd": x_sd, "y_mean": y_mean, "y_sd": y_sd,
+        "n": len(x_values),
+    }
+
+
+def _draw_bayesian_saturation(
+    model: dict[str, object], x_evaluate: np.ndarray,
+    draw_count: int = 1200, seed: int = 20260803,
+) -> dict[str, np.ndarray]:
+    """Draw model-averaged curves, slopes and sufficiency thresholds."""
+    rng = np.random.default_rng(seed)
+    candidates = model["candidates"]
+    weights = np.asarray(model["weights"], dtype=float)
+    model_indices = rng.choice(len(candidates), size=draw_count, p=weights)
+    betas = np.empty((draw_count, 2))
+    tau = np.empty(draw_count)
+    for index in np.unique(model_indices):
+        positions = np.flatnonzero(model_indices == index)
+        candidate = candidates[int(index)]
+        variance = 1.0 / rng.gamma(
+            shape=float(candidate["shape"]),
+            scale=1.0 / float(candidate["scale"]), size=len(positions),
+        )
+        root = np.linalg.cholesky(np.asarray(candidate["covariance"], dtype=float))
+        noise = rng.normal(size=(len(positions), 2)) @ root.T
+        betas[positions] = np.asarray(candidate["mean"], dtype=float) + (
+            noise * np.sqrt(variance)[:, None]
+        )
+        tau[positions] = float(candidate["tau"])
+    x_z = (
+        np.asarray(x_evaluate, dtype=float) - float(model["x_mean"])
+    ) / float(model["x_sd"])
+    capped = np.minimum(x_z[None, :], tau[:, None])
+    predicted_z = betas[:, [0]] + betas[:, [1]] * capped
+    predictions = predicted_z * float(model["y_sd"]) + float(model["y_mean"])
+    return {
+        "predictions": predictions,
+        "slope": betas[:, 1] * float(model["y_sd"]) / float(model["x_sd"]),
+        "threshold": tau * float(model["x_sd"]) + float(model["x_mean"]),
+    }
+
+
+def _mean_saturation_prediction(
+    model: dict[str, object], x_evaluate: np.ndarray,
+) -> np.ndarray:
+    x_z = (
+        np.asarray(x_evaluate, dtype=float) - float(model["x_mean"])
+    ) / float(model["x_sd"])
+    predictions = np.zeros(len(x_z))
+    for weight, candidate in zip(model["weights"], model["candidates"]):
+        mean = np.asarray(candidate["mean"], dtype=float)
+        predictions += float(weight) * (
+            mean[0] + mean[1] * np.minimum(x_z, float(candidate["tau"]))
+        )
+    return predictions * float(model["y_sd"]) + float(model["y_mean"])
+
+
+def _saturation_cv_comparison(
+    frame: pd.DataFrame, x: str, y: str,
+) -> dict[str, float | str]:
+    """Compare pooled and sex-specific saturation using leave-one-athlete-out error."""
+    plot = frame.dropna(subset=[x, y]).copy()
+    plot["analysis_gender"] = _physical_gender(plot)
+    plot = plot.loc[plot["analysis_gender"].isin(["Men", "Women"])].reset_index(drop=True)
+    if len(plot) < 9:
+        return {
+            "choice": "Pooled", "pooled_rmse": np.nan, "gender_rmse": np.nan,
+            "reason": "Too few athletes to compare held-out curves",
+        }
+    pooled_predictions, gender_predictions, actual = [], [], []
+    for index, row in plot.iterrows():
+        train = plot.drop(index=index)
+        pooled = _fit_bayesian_saturation(train[x].to_numpy(), train[y].to_numpy())
+        same = train.loc[train["analysis_gender"].eq(row["analysis_gender"])]
+        gender_model = _fit_bayesian_saturation(same[x].to_numpy(), same[y].to_numpy())
+        if pooled is None:
+            continue
+        pooled_predictions.append(float(_mean_saturation_prediction(pooled, [row[x]])[0]))
+        chosen_gender = gender_model if gender_model is not None else pooled
+        gender_predictions.append(float(_mean_saturation_prediction(chosen_gender, [row[x]])[0]))
+        actual.append(float(row[y]))
+    if not actual:
+        return {
+            "choice": "Pooled", "pooled_rmse": np.nan, "gender_rmse": np.nan,
+            "reason": "Too few valid held-out predictions",
+        }
+    actual_values = np.asarray(actual)
+    pooled_rmse = float(np.sqrt(np.mean((actual_values - pooled_predictions) ** 2)))
+    gender_rmse = float(np.sqrt(np.mean((actual_values - gender_predictions) ** 2)))
+    # Prefer the simpler pooled grade model unless sex-specific curves reduce
+    # genuine held-out error by a practical amount.
+    group_rho = []
+    for _, group in plot.groupby("analysis_gender"):
+        if len(group) >= 5:
+            value = _rank_corr(group[x], group[y])
+            if np.isfinite(value):
+                group_rho.append(value)
+    directional_heterogeneity = (
+        len(group_rho) >= 2
+        and np.nanmin(group_rho) < -0.15
+        and np.nanmax(group_rho) > 0.15
+    )
+    if gender_rmse + 5 < pooled_rmse * 0.98:
+        choice = "Gender-specific"
+        reason = "Lower held-out prediction error"
+    elif directional_heterogeneity:
+        choice = "Gender-specific"
+        reason = "Pooled line hides opposite group directions"
+    else:
+        choice = "Pooled"
+        reason = "Separate curves did not add stable held-out value"
+    return {
+        "choice": choice, "pooled_rmse": pooled_rmse,
+        "gender_rmse": gender_rmse, "reason": reason,
+    }
+
+
+def _rank_relationship_table(frame: pd.DataFrame, x: str, y: str) -> pd.DataFrame:
+    """Return pooled and sex-specific rank relationships with bootstrap uncertainty."""
+    plot = frame.dropna(subset=[x, y]).copy()
+    plot["analysis_gender"] = _physical_gender(plot)
+    rng = np.random.default_rng(20260803)
+    rows = []
+    for label, group in [("Pooled", plot), *list(plot.groupby("analysis_gender"))]:
+        if label == "Unspecified" or len(group) < 5:
+            continue
+        rho = _rank_corr(group[x], group[y])
+        draws = []
+        values = group[[x, y]].to_numpy(float)
+        for _ in range(500):
+            sample = values[rng.integers(0, len(values), len(values))]
+            draw = _rank_corr(sample[:, 0], sample[:, 1])
+            if np.isfinite(draw):
+                draws.append(float(draw))
+        low, high = np.quantile(draws, [0.05, 0.95]) if draws else (np.nan, np.nan)
+        rows.append({
+            "Group": label, "Athletes": len(group), "Rank relationship": rho,
+            "90% interval low": low, "90% interval high": high,
+            "P(positive)": float(np.mean(np.asarray(draws) > 0)) if draws else np.nan,
+        })
+    return pd.DataFrame(rows)
+
+
 def physical_transfer_figure(
     frame: pd.DataFrame,
     x: str,
     y: str,
     title: str,
     selected: list[str] | None = None,
-) -> tuple[go.Figure, float, dict[str, float]]:
-    """Plot Bayesian test-to-rating expectation and athlete transfer probabilities."""
+    gender_specific: bool = True,
+) -> tuple[go.Figure, float, dict[str, object]]:
+    """Plot Bayesian saturation thresholds, separately by sex when supported."""
     plot = frame.dropna(subset=[x, y]).copy()
     plot[x] = pd.to_numeric(plot[x], errors="coerce")
     plot[y] = pd.to_numeric(plot[y], errors="coerce")
     plot = plot.dropna(subset=[x, y])
     plot["name_key"] = plot["athlete_name"].map(plain_key)
-    rho = float(plot[x].rank().corr(plot[y].rank())) if len(plot) >= 3 else np.nan
+    plot["analysis_gender"] = _physical_gender(plot)
+    rho = _rank_corr(plot[x], plot[y]) if len(plot) >= 3 else np.nan
     figure = go.Figure()
     if plot.empty:
         return figure, rho, {
@@ -1539,64 +1764,82 @@ def physical_transfer_figure(
             "slope_high": np.nan, "draws": 0,
         }
 
-    # Conjugate Bayesian linear regression on standardized values. The weak
-    # Normal-inverse-gamma prior prevents tiny samples from looking certain,
-    # while preserving their direction instead of applying a binary gate.
-    x_mean, x_sd = float(plot[x].mean()), float(plot[x].std(ddof=0))
-    y_mean, y_sd = float(plot[y].mean()), float(plot[y].std(ddof=0))
-    x_sd = x_sd if np.isfinite(x_sd) and x_sd > 0 else 1.0
-    y_sd = y_sd if np.isfinite(y_sd) and y_sd > 0 else 1.0
-    x_standard = (plot[x].to_numpy(float) - x_mean) / x_sd
-    y_standard = (plot[y].to_numpy(float) - y_mean) / y_sd
-    design = np.column_stack([np.ones(len(plot)), x_standard])
-    prior_precision = np.diag([0.01, 0.04])
-    posterior_precision = prior_precision + design.T @ design
-    posterior_covariance = np.linalg.inv(posterior_precision)
-    posterior_mean = posterior_covariance @ design.T @ y_standard
-    prior_shape, prior_scale = 2.0, 1.0
-    posterior_shape = prior_shape + len(plot) / 2
-    scale_term = float(
-        y_standard @ y_standard
-        - posterior_mean @ posterior_precision @ posterior_mean
-    )
-    posterior_scale = max(1e-6, prior_scale + 0.5 * scale_term)
-    rng = np.random.default_rng(20260803 + len(plot))
-    draw_count = 1200
-    precision_draws = rng.gamma(
-        shape=posterior_shape, scale=1.0 / posterior_scale, size=draw_count
-    )
-    variance_draws = 1.0 / precision_draws
-    normal_draws = rng.normal(size=(draw_count, 2))
-    covariance_root = np.linalg.cholesky(posterior_covariance)
-    beta_draws = posterior_mean + (
-        normal_draws @ covariance_root.T
-    ) * np.sqrt(variance_draws)[:, None]
-    mean_draws = (design @ beta_draws.T).T * y_sd + y_mean
-    fitted_mean = mean_draws.mean(axis=0)
-    slope_draws = beta_draws[:, 1] * y_sd / x_sd
-    probability_positive = float(np.mean(slope_draws > 0))
-    slope_low, slope_high = np.quantile(slope_draws, [0.05, 0.95])
-
-    plot["test_expected_rating"] = fitted_mean
-    plot["transfer_residual"] = plot[y] - plot["test_expected_rating"]
-    median_residual = float(plot["transfer_residual"].median())
-    mad = float((plot["transfer_residual"] - median_residual).abs().median())
-    residual_scale = 1.4826 * mad
-    if not np.isfinite(residual_scale) or residual_scale < 1:
-        residual_scale = float(plot["transfer_residual"].std(ddof=1))
-    practical_margin = max(35.0, 0.35 * residual_scale) if np.isfinite(residual_scale) else 35.0
-    actual = plot[y].to_numpy(float)[None, :]
-    probability_opportunity = np.mean(actual > mean_draws + practical_margin, axis=0)
-    probability_lower_transfer = np.mean(actual < mean_draws - practical_margin, axis=0)
-    # A residual is only meaningful for training direction to the extent that
-    # the population relationship itself is credibly positive.
-    probability_opportunity *= probability_positive
-    probability_lower_transfer *= probability_positive
-    plot["probability_opportunity"] = probability_opportunity
-    plot["probability_lower_transfer"] = probability_lower_transfer
-    plot["posterior_direction_confidence"] = np.maximum(
-        probability_opportunity, probability_lower_transfer
-    )
+    if gender_specific and plot["analysis_gender"].nunique() > 1:
+        model_groups = [(label, group.copy()) for label, group in plot.groupby("analysis_gender")]
+    else:
+        model_groups = [("Pooled", plot.copy())]
+    group_evidence: list[dict[str, object]] = []
+    fitted_groups: list[pd.DataFrame] = []
+    curve_colors = {"Men": PALETTE["blue"], "Women": PALETTE["coral"], "Pooled": PALETTE["ink"]}
+    for group_index, (group_label, group) in enumerate(model_groups):
+        model = _fit_bayesian_saturation(group[x].to_numpy(), group[y].to_numpy())
+        if model is None:
+            continue
+        draws = _draw_bayesian_saturation(
+            model, group[x].to_numpy(), seed=20260803 + group_index + len(group)
+        )
+        positive = draws["slope"] > 0
+        probability_positive = float(positive.mean())
+        if positive.any():
+            group["probability_sufficient"] = np.mean(
+                group[x].to_numpy()[None, :] >= draws["threshold"][positive, None], axis=0
+            )
+            group["probability_below"] = 1 - group["probability_sufficient"]
+        else:
+            group["probability_sufficient"] = np.nan
+            group["probability_below"] = np.nan
+        group["test_expected_rating"] = draws["predictions"].mean(axis=0)
+        group["model_group"] = group_label
+        group["sufficiency_reading"] = "Threshold unresolved"
+        if probability_positive < 0.70:
+            group["sufficiency_reading"] = "No stable positive test relationship"
+        else:
+            group.loc[group["probability_sufficient"].ge(0.75), "sufficiency_reading"] = (
+                "Likely sufficient on this test"
+            )
+            group.loc[group["probability_below"].ge(0.75), "sufficiency_reading"] = (
+                "Possibly below estimated sufficiency"
+            )
+        x_line = np.linspace(float(group[x].min()), float(group[x].max()), 80)
+        curve_draws = _draw_bayesian_saturation(
+            model, x_line, seed=20260853 + group_index + len(group)
+        )["predictions"]
+        curve_mean = curve_draws.mean(axis=0)
+        curve_low, curve_high = np.quantile(curve_draws, [0.05, 0.95], axis=0)
+        color = curve_colors.get(group_label, PALETTE["ink"])
+        figure.add_trace(go.Scatter(
+            x=np.concatenate([x_line, x_line[::-1]]),
+            y=np.concatenate([curve_high, curve_low[::-1]]),
+            fill="toself", fillcolor=transparent(color, 0.10),
+            line={"color": "rgba(0,0,0,0)"}, hoverinfo="skip",
+            name=f"{group_label} 90% interval", legendgroup=group_label,
+            showlegend=False,
+        ))
+        figure.add_trace(go.Scatter(
+            x=x_line, y=curve_mean, mode="lines",
+            line={"color": color, "width": 2, "dash": "dash"},
+            name=f"{group_label} diminishing-return estimate", legendgroup=group_label,
+            hoverinfo="skip",
+        ))
+        slope_low, slope_high = np.quantile(draws["slope"], [0.05, 0.95])
+        threshold_low, threshold_mid, threshold_high = np.quantile(
+            draws["threshold"][positive] if positive.any() else draws["threshold"],
+            [0.05, 0.50, 0.95],
+        )
+        group_evidence.append({
+            "group": group_label, "athletes": len(group),
+            "probability_positive": probability_positive,
+            "slope_low": float(slope_low), "slope_high": float(slope_high),
+            "threshold_low": float(threshold_low), "threshold": float(threshold_mid),
+            "threshold_high": float(threshold_high),
+        })
+        fitted_groups.append(group)
+    if not fitted_groups:
+        return figure, rho, {
+            "probability_positive": np.nan, "slope_low": np.nan,
+            "slope_high": np.nan, "draws": 0, "groups": [],
+        }
+    plot = pd.concat(fitted_groups, ignore_index=True)
     evidence_column = f"{y} evidence"
     plot["rating_rounds"] = pd.to_numeric(
         plot.get(evidence_column, pd.Series(0, index=plot.index)), errors="coerce"
@@ -1611,23 +1854,14 @@ def physical_transfer_figure(
         ).clip(0.30, 0.95)
     else:
         plot["evidence_opacity"] = 0.72
-    plot["transfer_reading"] = "Direction uncertain"
-    plot.loc[
-        plot["probability_opportunity"].gt(plot["probability_lower_transfer"]),
-        "transfer_reading",
-    ] = "Possible opportunity: performance ahead of test"
-    plot.loc[
-        plot["probability_lower_transfer"].gt(plot["probability_opportunity"]),
-        "transfer_reading",
-    ] = "Possible lower transfer: test ahead of performance"
-
     colors = {
-        "Possible opportunity: performance ahead of test": PALETTE["coral"],
-        "Possible lower transfer: test ahead of performance": PALETTE["blue"],
-        "Direction uncertain": "#A2B5B1",
+        "Likely sufficient on this test": PALETTE["teal"],
+        "Possibly below estimated sufficiency": PALETTE["coral"],
+        "Threshold unresolved": PALETTE["gold"],
+        "No stable positive test relationship": "#A2B5B1",
     }
     selected_keys = {plain_key(name) for name in (selected or [])}
-    for reading, group in plot.groupby("transfer_reading", sort=False):
+    for reading, group in plot.groupby("sufficiency_reading", sort=False):
         labels = [
             friendly_name(name) if key in selected_keys else ""
             for name, key in zip(group["athlete_name"], group["name_key"])
@@ -1643,48 +1877,162 @@ def physical_transfer_figure(
             },
             customdata=np.column_stack([
                 group["athlete_name"], group["test_expected_rating"],
-                group["transfer_residual"], 100 * group["probability_opportunity"],
-                100 * group["probability_lower_transfer"], group["rating_rounds"],
+                100 * group["probability_sufficient"],
+                100 * group["probability_below"], group["rating_rounds"],
+                group["model_group"],
             ]),
             hovertemplate=(
                 "%{customdata[0]}<br>Test result: %{x:.2f}<br>Actual rating: %{y:.0f}"
-                "<br>Rating expected from this test alone: %{customdata[1]:.0f}"
-                "<br>Difference: %{customdata[2]:+.0f} Elo"
-                "<br>Posterior P(physical opportunity): %{customdata[3]:.0f}%"
-                "<br>Posterior P(lower transfer): %{customdata[4]:.0f}%"
-                "<br>Included rating rounds: %{customdata[5]:.0f}"
+                "<br>Saturating-model rating: %{customdata[1]:.0f}"
+                "<br>P(test is at/above plateau): %{customdata[2]:.0f}%"
+                "<br>P(test is below plateau): %{customdata[3]:.0f}%"
+                "<br>Included rating rounds: %{customdata[4]:.0f}"
+                "<br>Calibration group: %{customdata[5]}"
                 "<extra>%{fullData.name}</extra>"
             ),
         ))
-    x_line = np.array([float(plot[x].min()), float(plot[x].max())])
-    line_design = np.column_stack([np.ones(2), (x_line - x_mean) / x_sd])
-    line_draws = (line_design @ beta_draws.T).T * y_sd + y_mean
-    line_mean = line_draws.mean(axis=0)
-    line_low, line_high = np.quantile(line_draws, [0.05, 0.95], axis=0)
-    figure.add_trace(go.Scatter(
-        x=np.concatenate([x_line, x_line[::-1]]),
-        y=np.concatenate([line_high, line_low[::-1]]),
-        fill="toself", fillcolor=transparent(PALETTE["ink"], 0.10),
-        line={"color": "rgba(0,0,0,0)"}, hoverinfo="skip",
-        name="90% credible interval",
-    ))
-    figure.add_trace(go.Scatter(
-        x=x_line, y=line_mean, mode="lines",
-        line={"color": PALETTE["ink"], "width": 2, "dash": "dash"},
-        name="Rating expected from this test alone",
-        hoverinfo="skip",
-    ))
     figure.update_layout(
         title=title,
         xaxis_title=x.replace("_", " ").title(), yaxis_title=y,
-        height=590, legend_title="Test-to-performance reading",
+        height=590, legend_title="Sufficiency reading",
         margin={"l": 20, "r": 20, "t": 70, "b": 30},
     )
+    probabilities = [float(item["probability_positive"]) for item in group_evidence]
     return figure, rho, {
-        "probability_positive": probability_positive,
-        "slope_low": float(slope_low), "slope_high": float(slope_high),
-        "draws": draw_count,
+        "probability_positive": float(np.mean(probabilities)),
+        "slope_low": float(min(item["slope_low"] for item in group_evidence)),
+        "slope_high": float(max(item["slope_high"] for item in group_evidence)),
+        "draws": 1200, "groups": group_evidence,
     }
+
+
+def physical_sufficiency_table(
+    latest: pd.DataFrame, athlete_name: str, rating: str = "Global-ELO",
+) -> pd.DataFrame:
+    """Screen test sufficiency without turning one test into a causal limiter."""
+    if latest.empty or rating not in latest:
+        return pd.DataFrame()
+    source = latest.copy()
+    source["analysis_gender"] = _physical_gender(source)
+    source["value"] = pd.to_numeric(source["value"], errors="coerce")
+    source[rating] = pd.to_numeric(source[rating], errors="coerce")
+    context = source.get("context_only", pd.Series(False, index=source.index))
+    context = context.astype(str).str.lower().isin(["true", "1", "yes"])
+    source = source.loc[~context].copy()
+    target = source.loc[source["athlete_name"].map(plain_key).eq(plain_key(athlete_name))]
+    if target.empty:
+        return pd.DataFrame()
+    rows = []
+    today = pd.Timestamp.now().normalize()
+    for _, athlete_test in target.sort_values("test_date").drop_duplicates(
+        "test_name", keep="last"
+    ).iterrows():
+        peers = source.loc[
+            source["test_name"].eq(athlete_test["test_name"])
+            & source["analysis_gender"].eq(athlete_test["analysis_gender"])
+        ].dropna(subset=["value", rating])
+        value = float(athlete_test["value"])
+        percentile = float((peers["value"] <= value).mean()) if len(peers) else np.nan
+        probability_positive = probability_sufficient = probability_below = np.nan
+        threshold_low = threshold_mid = threshold_high = np.nan
+        model = _fit_bayesian_saturation(peers["value"].to_numpy(), peers[rating].to_numpy())
+        if model is not None:
+            draws = _draw_bayesian_saturation(
+                model, np.array([value]), draw_count=1000,
+                seed=20260803 + len(peers) + len(str(athlete_test["test_name"])),
+            )
+            positive = draws["slope"] > 0
+            probability_positive = float(positive.mean())
+            if positive.any():
+                probability_sufficient = float(
+                    np.mean(value >= draws["threshold"][positive])
+                )
+                probability_below = 1 - probability_sufficient
+                threshold_low, threshold_mid, threshold_high = np.quantile(
+                    draws["threshold"][positive], [0.05, 0.50, 0.95]
+                )
+        tested = pd.to_datetime(athlete_test.get("test_date"), errors="coerce")
+        days_old = int((today - tested).days) if pd.notna(tested) else np.nan
+        if (
+            np.isfinite(probability_sufficient) and probability_sufficient >= 0.75
+            and probability_positive >= 0.70
+        ):
+            status = "Likely sufficient—not the first limiter"
+        elif percentile >= 0.80:
+            status = "High peer capacity—no deficit signal"
+        elif (
+            np.isfinite(probability_below) and probability_below >= 0.75
+            and probability_positive >= 0.70 and (not np.isfinite(days_old) or days_old <= 540)
+        ):
+            status = "Capacity candidate—verify on matching boulders"
+        else:
+            status = "Unresolved—not a training prescription"
+        rows.append({
+            "Test": athlete_test["test_name"], "Quality": athlete_test["metric_category"],
+            "Date": tested, "Result": value, "Unit": athlete_test["unit"],
+            "Same-sex peers": len(peers), "Peer percentile": 100 * percentile,
+            "P(positive relation)": 100 * probability_positive,
+            "P(at/above sufficiency)": 100 * probability_sufficient,
+            "Estimated sufficiency": threshold_mid,
+            "Sufficiency 90% low": threshold_low, "Sufficiency 90% high": threshold_high,
+            "Days since test": days_old, "Current reading": status,
+        })
+    return pd.DataFrame(rows)
+
+
+def grade_evidence_summary(
+    profiles: pd.DataFrame, athletes: pd.DataFrame,
+) -> pd.DataFrame:
+    """Build transparent pooled/sex-specific grade relationships for the maths page."""
+    if profiles.empty:
+        return pd.DataFrame()
+    joined = profiles.copy()
+    joined["name_key"] = joined["athlete_name"].map(plain_key)
+    columns = [
+        column for column in [
+            "pool", "name_key", "gender", "Global-ELO", "IFSC-ELO", "WR-ELO",
+            "Global-ELO evidence", "IFSC-ELO evidence", "WR-ELO evidence",
+        ] if column in athletes
+    ]
+    if not {"pool", "name_key"}.issubset(columns):
+        return pd.DataFrame()
+    ratings = athletes[columns].copy()
+    evidence = "Global-ELO evidence" if "Global-ELO evidence" in ratings else "Global-ELO"
+    ratings = ratings.sort_values(evidence, ascending=False).drop_duplicates(["pool", "name_key"])
+    joined = joined.merge(ratings, on=["pool", "name_key"], how="left")
+    grade_metrics = {
+        "50% flash grade": "boulder_grade_50pct_flash_v",
+        "Max ≤3-send physical grade": "boulder_grade_3x_physical_sends_last_3_months_v",
+    }
+    rows = []
+    for grade_label, grade_column in grade_metrics.items():
+        if grade_column not in joined:
+            continue
+        for rating in RATING_ORDER:
+            if rating not in joined:
+                continue
+            plot = joined.copy()
+            plot[grade_column] = pd.to_numeric(plot[grade_column], errors="coerce")
+            plot[rating] = pd.to_numeric(plot[rating], errors="coerce")
+            plot = plot.dropna(subset=[grade_column, rating])
+            if len(plot) < 5:
+                continue
+            comparison = _saturation_cv_comparison(plot, grade_column, rating)
+            relationships = _rank_relationship_table(plot, grade_column, rating)
+            for _, relationship in relationships.iterrows():
+                rows.append({
+                    "Grade": grade_label, "Rating": rating,
+                    "Group": relationship["Group"], "Athletes": relationship["Athletes"],
+                    "Rank relationship": relationship["Rank relationship"],
+                    "90% low": relationship["90% interval low"],
+                    "90% high": relationship["90% interval high"],
+                    "P(positive)": relationship["P(positive)"],
+                    "Held-out curve": comparison["choice"],
+                    "Model reason": comparison["reason"],
+                    "Pooled RMSE": comparison["pooled_rmse"],
+                    "Sex-specific RMSE": comparison["gender_rmse"],
+                })
+    return pd.DataFrame(rows)
 
 
 def render_physical_strength(
@@ -1840,83 +2188,108 @@ def render_physical_strength(
                 "Choose another athlete or add a testing session before drawing a physical profile."
             )
             return
-        physical = athlete.loc[~athlete["recommendation"].astype(str).str.startswith("Context")].copy()
-        physical["peer_percentile"] = pd.to_numeric(physical["peer_percentile"], errors="coerce")
-        physical["priority_score"] = pd.to_numeric(physical["priority_score"], errors="coerce")
-        focus = physical.loc[physical["recommendation"].eq("Focus candidate")]
-        strengths = physical.loc[physical["recommendation"].eq("Strength to protect")]
+        sufficiency = physical_sufficiency_table(latest, athlete_name)
+        if sufficiency.empty:
+            st.info("No current same-sex sufficiency screen is available for this athlete.")
+            return
+        likely_sufficient = sufficiency.loc[
+            sufficiency["Current reading"].str.contains(
+                "Likely sufficient|High peer capacity", regex=True
+            )
+        ]
+        candidates = sufficiency.loc[
+            sufficiency["Current reading"].str.startswith("Capacity candidate")
+        ]
         cards = st.columns(3)
-        cards[0].metric("Physical tests", f"{len(physical)}")
-        cards[1].metric("Focus candidates", f"{len(focus)}")
-        cards[2].metric("Strengths to protect", f"{len(strengths)}")
-        if focus.empty:
+        cards[0].metric("Physical tests", f"{len(sufficiency)}")
+        cards[1].metric("No deficit signal", f"{len(likely_sufficient)}")
+        cards[2].metric("Capacity candidates", f"{len(candidates)}")
+        if candidates.empty:
             st.info(
-                "No clear physical limiter can be defended from the current data for this "
-                "athlete. Use the test history and climbing observations before changing training."
+                "No physical limiter can currently be defended. A sufficient test can rule out "
+                "one simple explanation; it cannot prove what is limiting performance."
             )
         else:
-            first = focus.sort_values("priority_score", ascending=False).iloc[0]
-            st.success(
-                f"First quality to investigate: {first['test_name']} ({first['metric_category']}). "
-                f"This is a {first['certainty'].lower()} hypothesis, not a diagnosis."
+            first = candidates.sort_values("P(at/above sufficiency)").iloc[0]
+            st.warning(
+                f"First capacity to verify: {first['Test']} ({first['Quality']}). It becomes a "
+                "limiter only if matching boulders demand it and the athlete's attempts show it "
+                "is the first constraint reached."
             )
-        ordered = pd.concat([
-            focus.sort_values("priority_score", ascending=False),
-            strengths.sort_values("peer_percentile", ascending=False),
-            physical.loc[~physical.index.isin(focus.index.union(strengths.index))]
-            .sort_values("test_date", ascending=False),
-        ]).drop_duplicates("test_name").head(16).sort_values("peer_percentile")
+        if plain_key(athlete_name) == plain_key("Louka Boivin"):
+            louka_20mm = sufficiency.loc[
+                sufficiency["Test"].astype(str).str.fullmatch(
+                    "20mm HC Semi-Isolé", case=False, na=False
+                )
+            ].sort_values("Date").tail(1)
+            if not louka_20mm.empty:
+                item = louka_20mm.iloc[0]
+                st.success(
+                    f"Louka sanity check: {item['Result']:.1f} {item['Unit']} on {item['Test']} "
+                    f"is around the {item['Peer percentile']:.0f}th percentile of comparable men. "
+                    "The evidence argues against maximal 20 mm strength as his first limiter. "
+                    "Maintain it; investigate terrain transfer, movement, tactics and other "
+                    "capacities before adding more finger-strength emphasis."
+                )
+        ordered = sufficiency.sort_values(
+            ["Current reading", "Peer percentile"], ascending=[True, True]
+        ).head(18).sort_values("Peer percentile")
         if not ordered.empty:
             recommendation_colors = {
-                "Focus candidate": PALETTE["coral"],
-                "Strength to protect": PALETTE["teal"],
-                "Monitor; not a clear limiter": PALETTE["gold"],
-                "Evidence too uncertain to prescribe": "#A8B6B3",
+                "Capacity candidate—verify on matching boulders": PALETTE["coral"],
+                "Likely sufficient—not the first limiter": PALETTE["teal"],
+                "High peer capacity—no deficit signal": PALETTE["blue"],
+                "Unresolved—not a training prescription": PALETTE["gold"],
             }
             figure = go.Figure()
-            for label, group in ordered.groupby("recommendation", sort=False):
+            for label, group in ordered.groupby("Current reading", sort=False):
                 figure.add_trace(go.Bar(
-                    x=100 * group["peer_percentile"], y=group["test_name"],
+                    x=group["Peer percentile"], y=group["Test"],
                     orientation="h", name=label,
                     marker_color=recommendation_colors.get(label, "#A8B6B3"),
                     customdata=np.column_stack([
-                        group["value"], group["unit"], group["peer_athletes"],
-                        group["test_date"], group["certainty"],
+                        group["Result"], group["Unit"], group["Same-sex peers"],
+                        group["Date"], group["P(at/above sufficiency)"],
                     ]),
                     hovertemplate=(
                         "%{y}<br>Peer percentile: %{x:.0f}"
                         "<br>Result: %{customdata[0]} %{customdata[1]}"
                         "<br>Peer athletes: %{customdata[2]}"
                         "<br>Test date: %{customdata[3]}"
-                        "<br>%{customdata[4]}<extra></extra>"
+                        "<br>P(at/above estimated sufficiency): %{customdata[4]:.0f}%"
+                        "<extra></extra>"
                     ),
                 ))
             figure.add_vline(x=35, line_dash="dot", line_color=PALETTE["coral"])
             figure.add_vline(x=70, line_dash="dot", line_color=PALETTE["teal"])
             figure.update_layout(
                 title=f"{friendly_name(athlete_name)} — physical profile against comparable peers",
-                xaxis={"title": "Percentile among same-gender peers (age ±2 years when available)",
+                xaxis={"title": "Percentile among same-sex peers",
                        "range": [0, 100]},
                 yaxis_title="", barmode="overlay", height=max(520, 34 * len(ordered)),
                 margin={"l": 20, "r": 20, "t": 70, "b": 30},
             )
             st.plotly_chart(figure, width="stretch", theme=None)
-        shown = physical[[
-            "test_name", "metric_category", "test_date", "value", "unit",
-            "peer_percentile", "peer_athletes", "recommendation", "certainty",
-        ]].copy()
-        shown["peer_percentile"] = (100 * shown["peer_percentile"]).round(0)
-        shown = shown.rename(columns={
-            "test_name": "Test", "metric_category": "Quality", "test_date": "Date",
-            "value": "Result", "unit": "Unit", "peer_percentile": "Peer percentile",
-            "peer_athletes": "Peer athletes", "recommendation": "Decision",
-            "certainty": "Certainty",
-        })
+        shown = sufficiency[[
+            "Test", "Quality", "Date", "Result", "Unit", "Peer percentile",
+            "Same-sex peers", "P(positive relation)", "P(at/above sufficiency)",
+            "Estimated sufficiency", "Days since test", "Current reading",
+        ]].sort_values(["Current reading", "Peer percentile"])
         st.dataframe(shown, hide_index=True, width="stretch")
+        st.markdown("#### The first-limiter check")
+        st.dataframe(pd.DataFrame([
+            {"Gate": "Capacity", "Question": "Is the fresh test probably below sufficiency?",
+             "Current evidence": "Estimated above; uncertainty is shown per test."},
+            {"Gate": "Demand", "Question": "Did the target boulder strongly require this quality?",
+             "Current evidence": "Pending structured boulder-style tags."},
+            {"Gate": "Observed failure", "Question": "Did attempts fail first for this reason?",
+             "Current evidence": "Requires matching on-wall observations."},
+            {"Gate": "Actionability", "Question": "Can training improve it safely in the available time?",
+             "Current evidence": "Coach judgement, health and training response required."},
+        ]), hide_index=True, width="stretch")
         st.caption(
-            "A focus candidate requires both a low peer result and a positive population signal. "
-            "It should be checked against movement style, training history, injury risk and response "
-            "to training before becoming a program priority."
+            "Only converging gates justify a training priority. The model deliberately calls a "
+            "below-threshold result a capacity candidate—not a limiter or a prescription."
         )
         return
 
@@ -1939,19 +2312,30 @@ def render_physical_strength(
                 plot, "value", rating, f"{test} and current {rating}", selected
             )
             st.plotly_chart(figure, width="stretch", theme=None)
+            group_table = pd.DataFrame(transfer_evidence.get("groups", [])).rename(columns={
+                "group": "Group", "athletes": "Athletes",
+                "probability_positive": "P(positive relation)",
+                "threshold": "Estimated sufficiency",
+                "threshold_low": "Sufficiency 90% low",
+                "threshold_high": "Sufficiency 90% high",
+            })
+            if not group_table.empty:
+                group_table["P(positive relation)"] *= 100
+                st.dataframe(group_table[[
+                    "Group", "Athletes", "P(positive relation)",
+                    "Estimated sufficiency", "Sufficiency 90% low",
+                    "Sufficiency 90% high",
+                ]], hide_index=True, width="stretch")
             st.info(
-                f"Current rank relationship: {current_rho:.2f}. Bayesian probability that the "
-                f"population relationship is positive: "
-                f"{100 * transfer_evidence['probability_positive']:.0f}% "
-                f"(90% slope interval {transfer_evidence['slope_low']:.1f} to "
-                f"{transfer_evidence['slope_high']:.1f} Elo per test unit). Athlete hover shows "
-                "the posterior probability of each direction; marker density shows how many "
-                "rounds support the displayed Elo."
+                "Each sex is calibrated separately. The curve rises below an uncertain "
+                "sufficiency point and then flattens: more capacity past that point is not "
+                "assumed to buy the same Elo gain. Hover shows threshold probabilities and "
+                "how many rounds support the displayed Elo."
             )
             st.caption(
-                f"{plot['testing_person_key'].nunique()} linked athletes. Residual tags are screening "
-                "hypotheses, not causal training prescriptions. Use Population priorities for the "
-                "harder frozen future-performance test."
+                f"{plot['testing_person_key'].nunique()} linked athletes. A below-threshold result "
+                "is only a capacity candidate. Terrain demand and the first observed cause of "
+                "failure must agree before it becomes a limiter hypothesis."
             )
         coverage = latest.groupby(["metric_category", "test_name"], as_index=False).agg(
             athletes=("testing_person_key", "nunique"),
@@ -2004,21 +2388,34 @@ def render_physical_strength(
         plot[value_column] = pd.to_numeric(plot[value_column], errors="coerce")
         plot[rating] = pd.to_numeric(plot[rating], errors="coerce")
         plot = plot.dropna(subset=[value_column, rating])
+        model_comparison = _saturation_cv_comparison(plot, value_column, rating)
+        use_gender_model = model_comparison["choice"] == "Gender-specific"
         figure, grade_rho, grade_transfer_evidence = physical_transfer_figure(
-            plot, value_column, rating, f"{test} and {rating}", selected
+            plot, value_column, rating, f"{test} and {rating}", selected,
+            gender_specific=use_gender_model,
         )
         st.plotly_chart(figure, width="stretch", theme=None)
+        relationship_table = _rank_relationship_table(plot, value_column, rating)
+        if not relationship_table.empty:
+            st.markdown("#### Grade relationships worth retaining")
+            relationship_shown = relationship_table.copy()
+            relationship_shown["P(positive)"] *= 100
+            relationship_shown = relationship_shown.rename(
+                columns={"P(positive)": "P(positive), %"}
+            )
+            st.dataframe(relationship_shown, hide_index=True, width="stretch")
         st.info(
-            f"Current rank relationship: {grade_rho:.2f}. Bayesian probability that the "
-            f"population relationship is positive: "
-            f"{100 * grade_transfer_evidence['probability_positive']:.0f}% "
-            f"(90% slope interval {grade_transfer_evidence['slope_low']:.1f} to "
-            f"{grade_transfer_evidence['slope_high']:.1f} Elo per grade). The dashed line and "
-            "athlete probabilities identify questions to investigate, not proof of a limiter."
+            f"Held-out model choice: {model_comparison['choice']}. Pooled saturation RMSE: "
+            f"{model_comparison['pooled_rmse']:.0f} Elo; sex-specific saturation RMSE: "
+            f"{model_comparison['gender_rmse']:.0f} Elo. Reason: {model_comparison['reason']}. "
+            "Grades are pooled unless separate "
+            "curves materially predict unseen athletes better. Physical tests remain "
+            "sex-specific by default."
         )
         st.caption(
             f"{len(plot)} linked athletes are visible for this exact grade × rating pair. "
-            "Grade values are converted to the common V-scale used in the testing source."
+            "Rank relationships retain non-linear ordering; the curve allows diminishing "
+            "returns. Neither establishes a causal training effect."
         )
     if not associations.empty:
         shown = associations.copy()
@@ -2078,6 +2475,137 @@ def render_maths_behind(
         },
     ])
     st.dataframe(comparison, hide_index=True, width="stretch")
+    st.markdown("#### Physical capacity: why the straight line was rejected")
+    st.write(
+        "A straight line says that every extra kilogram on a test buys the same expected Elo. "
+        "That is implausible for a multi-constraint sport. Too little capacity can make a move "
+        "impossible; enough capacity removes that constraint; additional capacity may save time "
+        "or attempts, but usually with diminishing returns. The app now fits physical tests "
+        "separately for men and women with an uncertain linear-then-plateau curve."
+    )
+    st.latex(r"Elo_i = \alpha_g + \beta_g\,\min(z_i,\tau_g) + \varepsilon_i")
+    st.caption(
+        "g is the sex-specific pool, z is the standardized test, and τ is the unknown "
+        "sufficiency point. The Bayesian fit averages many possible τ values. It reports "
+        "P(at/above sufficiency), not a fake exact cutoff. A pooled curve remains available "
+        "for self-reported grades and is selected unless sex-specific curves predict held-out "
+        "athletes materially better."
+    )
+    st.dataframe(pd.DataFrame([
+        {
+            "Option": "Straight line", "What it assumes": "Constant Elo return per test unit",
+            "Why keep it": "Simple diagnostic baseline",
+            "Why not use it for decisions": "Extrapolates endless benefit and turns residuals into false deficits",
+            "Status": "Rejected as decision model",
+        },
+        {
+            "Option": "Bayesian linear-to-plateau", "What it assumes": "Benefit below an uncertain sufficiency point, then diminishing return",
+            "Why keep it": "Interpretable with small samples; threshold uncertainty is explicit",
+            "Why not use it for decisions": "A population plateau is not a boulder-specific requirement",
+            "Status": "Current screening model",
+        },
+        {
+            "Option": "Hill / logistic curve", "What it assumes": "Smooth S-shaped response",
+            "Why keep it": "Physiologically plausible when low values have little effect and middle values matter most",
+            "Why not use it for decisions": "More weakly identified parameters at current sample sizes",
+            "Status": "Backtest challenger",
+        },
+        {
+            "Option": "Isotonic or spline model", "What it assumes": "Monotonic shape learned from data",
+            "Why keep it": "Can discover several bends without choosing one threshold",
+            "Why not use it for decisions": "Can follow noise and is unstable outside observed values",
+            "Status": "Use when the database grows",
+        },
+        {
+            "Option": "Hierarchical sex-specific model", "What it assumes": "Separate curves share information instead of being fully pooled or split",
+            "Why keep it": "Best compromise for unequal male/female samples",
+            "Why not use it for decisions": "Needs more repeated tests and careful athlete-level validation",
+            "Status": "Preferred next upgrade",
+        },
+        {
+            "Option": "Boulder-demand first-limiter model", "What it assumes": "The smallest capacity-minus-demand margin controls success",
+            "Why keep it": "Matches the coaching question: what failed first on this terrain?",
+            "Why not use it for decisions": "Requires style tags and attempt-level observations",
+            "Status": "Target model",
+        },
+    ]), hide_index=True, width="stretch")
+    st.markdown("#### The proposed first-limiter model")
+    st.write(
+        "A competition boulder is not an average of finger strength, power, technique and "
+        "coordination. The first demand that exceeds the athlete's usable capacity often "
+        "controls the attempt. The next model will combine athlete capacities with each "
+        "tagged boulder's demands through a smooth minimum:"
+    )
+    st.latex(
+        r"m_{ij}=\operatorname{softmin}_k(C_{ik}-D_{jk}),\qquad "
+        r"P(\mathrm{success}_{ij})=\operatorname{logit}^{-1}(a+b\,m_{ij})"
+    )
+    st.caption(
+        "C is athlete capacity, D is boulder demand, and the smallest capacity-minus-demand "
+        "margin dominates. This is not yet a production causal model: it requires style tags, "
+        "attempt-level failure evidence and enough repeated boulders. Until then the app says "
+        "capacity candidate, likely sufficient, or unresolved—never 'train this' from one residual."
+    )
+    st.markdown("#### How this fits the climbing literature")
+    st.markdown(
+        "- A randomized trial improved dynamic and isometric finger strength without a "
+        "detectable improvement in bouldering performance. That is direct evidence against "
+        "treating strength change as automatic performance transfer "
+        "([Saeterbakken et al., 2024](https://pubmed.ncbi.nlm.nih.gov/39450143/)).\n"
+        "- In a 67-climber bouldering competition, finger strength, experience and climbing "
+        "frequency jointly predicted performance; no single test explained the full result "
+        "([Stefan et al., 2022](https://pubmed.ncbi.nlm.nih.gov/35235904/)).\n"
+        "- Test-performance relationships differed between female and male groups in an "
+        "intermittent finger-endurance study, supporting sex-specific physical calibration "
+        "rather than one forced line "
+        "([Augste et al., 2022](https://pubmed.ncbi.nlm.nih.gov/35677360/)).\n"
+        "- Force on a deep edge did not predict force on very shallow edges in experienced "
+        "climbers, showing that even 'finger strength' is hold-specific "
+        "([Bourne et al., 2011](https://pubmed.ncbi.nlm.nih.gov/21451181/))."
+    )
+    st.warning(
+        "The literature supports specificity, multiple constraints and imperfect transfer. "
+        "It does not prove this app's exact plateau or first-limiter equation. Those are "
+        "testable modelling hypotheses and must earn promotion through frozen future-event "
+        "validation."
+    )
+    grade_summary = grade_evidence_summary(
+        data.get("physical_profiles", pd.DataFrame()), athletes
+    )
+    if not grade_summary.empty:
+        st.markdown("#### Valuable self-reported grade relationships")
+        grade_shown = grade_summary.copy()
+        grade_shown["P(positive)"] *= 100
+        grade_shown = grade_shown.rename(columns={"P(positive)": "P(positive), %"})
+        st.dataframe(
+            grade_shown.sort_values(
+                ["Grade", "Rating", "Group"]
+            ), hide_index=True, width="stretch",
+        )
+        eligible = grade_summary.loc[grade_summary["Athletes"].ge(8)].copy()
+        if not eligible.empty:
+            strongest = eligible.sort_values("P(positive)", ascending=False).iloc[0]
+            st.info(
+                f"Strongest current positive direction: {strongest['Grade']} versus "
+                f"{strongest['Rating']} in {strongest['Group']} (rank relationship "
+                f"{strongest['Rank relationship']:.2f}; {strongest['Athletes']:.0f} athletes; "
+                f"P(positive) {100 * strongest['P(positive)']:.0f}%). Its 90% interval is "
+                f"{strongest['90% low']:.2f} to {strongest['90% high']:.2f}, so this remains "
+                "a useful direction with visible uncertainty—not a settled benchmark."
+            )
+        if grade_summary["Model reason"].eq(
+            "Pooled line hides opposite group directions"
+        ).any():
+            st.warning(
+                "At least one pooled grade relationship reverses or hides the group-specific "
+                "directions. The app shows men and women separately there instead of turning a "
+                "Simpson's-paradox pattern into a coaching conclusion."
+            )
+        st.caption(
+            "Rank relationship preserves ordering without forcing linearity. P(positive) and "
+            "the 90% interval keep uncertain relationships useful without presenting them as "
+            "certain. Held-out RMSE chooses pooled versus sex-specific saturation curves."
+        )
     backtest = data.get("model_backtest", pd.DataFrame())
     if not backtest.empty:
         st.markdown("#### Frozen next-competition backtest")

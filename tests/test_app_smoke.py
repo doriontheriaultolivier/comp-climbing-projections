@@ -5,7 +5,14 @@ import pandas as pd
 import plotly.graph_objects as go
 from streamlit.testing.v1 import AppTest
 
-from comp_climbing_app import add_outcome_thresholds, physical_transfer_figure
+from comp_climbing_app import (
+    _saturation_cv_comparison,
+    add_outcome_thresholds,
+    physical_sufficiency_table,
+    physical_transfer_figure,
+    plain_key,
+    read_data,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,7 +118,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("🟠 Top - Slopers", slider_labels)
         self.assertIn("🔵 Zone - Dyno", slider_labels)
 
-    def test_physical_transfer_plot_has_fitted_line_and_residual_tags(self) -> None:
+    def test_physical_transfer_plot_has_saturation_curve_and_sufficiency_tags(self) -> None:
         frame = pd.DataFrame({
             "athlete_name": [f"Athlete {index}" for index in range(14)],
             "value": list(range(14)),
@@ -124,8 +131,45 @@ class AppSmokeTests(unittest.TestCase):
         self.assertGreater(rho, 0.2)
         self.assertGreater(evidence["probability_positive"], 0.5)
         trace_names = {trace.name for trace in figure.data}
-        self.assertIn("Rating expected from this test alone", trace_names)
-        self.assertIn("Possible opportunity: performance ahead of test", trace_names)
+        self.assertIn("Pooled diminishing-return estimate", trace_names)
+        self.assertIn("Possibly below estimated sufficiency", trace_names)
+        self.assertTrue(evidence["groups"])
+        self.assertGreater(evidence["groups"][0]["threshold"], 5)
+
+    def test_grade_curve_detects_group_direction_conflict(self) -> None:
+        frame = pd.DataFrame({
+            "athlete_name": [f"M {i}" for i in range(8)] + [f"W {i}" for i in range(8)],
+            "pool": ["Boulder_Men"] * 8 + ["Boulder_Women"] * 8,
+            "grade": list(range(8)) + list(range(8)),
+            "Global-ELO": [1800 + 20 * i for i in range(8)]
+            + [2100 - 20 * i for i in range(8)],
+        })
+        comparison = _saturation_cv_comparison(frame, "grade", "Global-ELO")
+        self.assertEqual(comparison["choice"], "Gender-specific")
+        self.assertIn(
+            comparison["reason"],
+            {"Lower held-out prediction error", "Pooled line hides opposite group directions"},
+        )
+
+    def test_louka_half_crimp_has_no_deficit_signal(self) -> None:
+        data = read_data()
+        latest = data["physical_latest"].copy()
+        latest["name_key"] = latest["athlete_name"].map(plain_key)
+        evidence_columns = [
+            column for column in [
+                "Global-ELO evidence", "IFSC-ELO evidence", "WR-ELO evidence"
+            ] if column in data["athletes"]
+        ]
+        lookup = (
+            data["athletes"][["pool", "name_key", *evidence_columns]]
+            .sort_values(evidence_columns[0], ascending=False)
+            .drop_duplicates(["pool", "name_key"])
+        )
+        latest = latest.merge(lookup, on=["pool", "name_key"], how="left")
+        screen = physical_sufficiency_table(latest, "Louka Boivin")
+        half_crimp = screen.loc[screen["Test"].eq("20mm HC Semi-Isolé")].iloc[0]
+        self.assertGreaterEqual(half_crimp["Peer percentile"], 95)
+        self.assertIn("no deficit signal", half_crimp["Current reading"].lower())
 
 
 if __name__ == "__main__":
