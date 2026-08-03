@@ -5,7 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from streamlit.testing.v1 import AppTest
 
-from comp_climbing_app import add_outcome_thresholds
+from comp_climbing_app import add_outcome_thresholds, physical_transfer_figure
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,6 +90,42 @@ class AppSmokeTests(unittest.TestCase):
         levels = sorted(float(shape.y0) for shape in figure.layout.shapes)
         self.assertAlmostEqual(levels[0], 2000.0, places=6)
         self.assertTrue(levels == sorted(levels))
+
+    def test_standalone_style_tagger_uses_paired_optional_scores(self) -> None:
+        app = AppTest.from_file(str(ROOT / "style_tagging_app.py"))
+        app.run(timeout=120)
+        self.assertFalse(app.exception)
+        self.assertEqual(app.title[0].value, "Comp Climbing Boulder Tags")
+        slider_labels = {item.label for item in app.slider}
+        self.assertIn("🟠 Top - Physical", slider_labels)
+        self.assertIn("🔵 Zone - Physical", slider_labels)
+        self.assertNotIn("Up to 3 moves before zone", {item.label for item in app.text_area})
+
+        optional = next(
+            item for item in app.checkbox
+            if item.label == "I would like to help further and identify tags"
+        )
+        optional.set_value(True).run(timeout=120)
+        self.assertFalse(app.exception)
+        slider_labels = {item.label for item in app.slider}
+        self.assertIn("🟠 Top - Slopers", slider_labels)
+        self.assertIn("🔵 Zone - Dyno", slider_labels)
+
+    def test_physical_transfer_plot_has_fitted_line_and_residual_tags(self) -> None:
+        frame = pd.DataFrame({
+            "athlete_name": [f"Athlete {index}" for index in range(14)],
+            "value": list(range(14)),
+            "Global-ELO": [1800 + 25 * index for index in range(14)],
+        })
+        frame.loc[13, "Global-ELO"] += 250
+        figure, rho, usable = physical_transfer_figure(
+            frame, "value", "Global-ELO", "Test transfer"
+        )
+        self.assertTrue(usable)
+        self.assertGreater(rho, 0.2)
+        trace_names = {trace.name for trace in figure.data}
+        self.assertIn("Rating expected from this test alone", trace_names)
+        self.assertIn("Possible opportunity: performance ahead of this test", trace_names)
 
 
 if __name__ == "__main__":

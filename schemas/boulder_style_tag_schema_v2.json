@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://comp-climbing-projections.streamlit.app/schemas/boulder_style_tag_schema_v2.json",
+  "title": "Comp Climbing Boulder Style Tag v2",
+  "description": "Zone/Top demand observation. Scores describe terrain demand, not athlete ability.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "submitted_at_utc",
+    "competition",
+    "round",
+    "gender_terrain",
+    "boulder",
+    "top_direction",
+    "zone_direction",
+    "top_physical_0_3",
+    "zone_physical_0_3",
+    "top_technical_0_3",
+    "zone_technical_0_3",
+    "top_coordination_0_3",
+    "zone_coordination_0_3",
+    "top_verticality_0_3",
+    "zone_verticality_0_3",
+    "optional_tags_completed",
+    "confidence"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "submitted_at_utc": {"type": "string", "format": "date-time"},
+    "competition": {"type": "string", "minLength": 1},
+    "competition_date": {"type": "string", "pattern": "^$|^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "round": {"enum": ["Qualification", "Semi-final", "Final", "Other"]},
+    "gender_terrain": {"enum": ["Men", "Women", "Mixed / unknown"]},
+    "boulder": {"type": "string", "minLength": 1},
+    "image_name": {"type": "string"},
+    "image_sha256": {"type": "string", "pattern": "^$|^[a-f0-9]{64}$"},
+    "image_in_bundle": {"type": "string"},
+    "top_direction": {"enum": ["Up", "Diagonal", "Sideways", "Mixed / unclear"]},
+    "zone_direction": {"enum": ["Up", "Diagonal", "Sideways", "Mixed / unclear"]},
+    "optional_tags_completed": {"type": "boolean"},
+    "zone_move": {"type": "string"},
+    "top_move": {"type": "string"},
+    "notes": {"type": "string"},
+    "confidence": {"enum": ["Low", "Moderate", "High"]},
+    "contributor": {"type": "string"}
+  },
+  "patternProperties": {
+    "^(top|zone)_[a-z0-9_]+_0_3$": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    }
+  },
+  "additionalProperties": false
+}

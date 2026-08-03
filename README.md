@@ -36,13 +36,21 @@ positive future-performance signal and the athlete is low relative to suitable
 peers. The current signals remain exploratory and are labelled accordingly;
 the interface does not turn a correlation into a training prescription.
 
-The public **Tag Boulder Styles** workspace records a boulder image, competition,
-round, gender terrain, physical/technical/coordination demand, wall angle,
-movement sequence around the zone, detailed demand scores and confidence.
-Visitors can export CSV, JSON or a complete ZIP containing images. Community
-Cloud storage is temporary, so this release deliberately keeps tags in the
-visitor session until a durable shared write backend is connected. The machine
-contract is in [the style-tag schema](schemas/boulder_style_tag_schema_v1.json).
+The public **Boulder Style Tagging** tool records a boulder image, searchable
+competition/date, round, gender terrain, direction and independent Physical,
+Technical and Coordination demand. Every score is split between the section
+ending at **Zone** and the section ending at **Top**. Detailed handhold,
+foothold, physical, technical and move-type tags are optional and default to
+zero. Visitors can export CSV, JSON or a complete ZIP containing images.
+
+`style_tagging_app.py` is the lightweight standalone public entry point. It can
+write images to Google Drive and rows to Google Sheets through the Apps Script
+backend in `deployment/google_apps_script/style_tag_backend.gs`. Configure the
+Apps Script property `STYLE_TAG_FOLDER_ID`, deploy it as an anonymous web app,
+then add its `/exec` URL to Streamlit secrets as `STYLE_TAG_WEBHOOK_URL`. If the
+backend is unavailable, the session export remains a recoverable safety copy.
+The current machine contract is [schema v2](schemas/boulder_style_tag_schema_v2.json);
+[schema v1](schemas/boulder_style_tag_schema_v1.json) remains for older exports.
 
 ## Rating contract
 

@@ -8,11 +8,14 @@ does not retain the full research warehouse in memory.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import base64
 import hashlib
 import io
 import json
 from pathlib import Path
 import unicodedata
+from urllib import error as urlerror
+from urllib import request as urlrequest
 import zipfile
 
 import numpy as np
@@ -57,6 +60,61 @@ ATHLETE_COLORS = [
     "#0B7A75", "#F26B5B", "#4285A9", "#E6A23C", "#8E5AA7",
     "#2E8B57", "#D05A8A", "#6B7C93", "#A66A3F", "#4C9F9A",
 ]
+
+STYLE_DEFINITIONS = {
+    "physical": (
+        "Force, power or body-tension demand. A move can be highly physical without "
+        "being technical or coordinative."
+    ),
+    "technical": (
+        "Precision, balance, body positioning or movement efficiency when linked timing "
+        "and momentum are not the main problem."
+    ),
+    "coordination": (
+        "Linked timing, momentum, redirection or multi-limb sequencing. A coordination "
+        "move is not automatically high-physical or high-technical."
+    ),
+}
+
+STYLE_TAG_GROUPS = {
+    "Physical qualities": [
+        ("explosiveness", "Explosiveness"),
+        ("body_tension", "Body tension"),
+        ("overall_strength", "Overall strength"),
+    ],
+    "Technical qualities": [
+        ("slow_precision", "Slow precision"),
+        ("curved_coordination", "Coordination curves"),
+        ("reaction_time", "Reaction time"),
+        ("proprioception", "Proprioception"),
+    ],
+    "Handholds": [
+        ("hand_slopers", "Slopers"),
+        ("hand_jugs", "Jugs"),
+        ("hand_crimps", "Crimps"),
+        ("hand_pinches", "Pinches"),
+    ],
+    "Footholds": [
+        ("foot_small_incut", "Small incut feet"),
+        ("foot_small_smeary", "Small smeary feet"),
+        ("foot_volumes", "Volumes"),
+        ("foot_juggy", "Juggy footholds"),
+    ],
+    "Move types": [
+        ("move_blocked", "Blocked / constrained"),
+        ("move_dyno", "Dyno"),
+        ("move_run_jump", "Run-and-jump"),
+        ("move_paddle", "Paddle"),
+        ("move_deadpoint", "Deadpoint"),
+        ("move_compression", "Compression"),
+        ("move_press", "Press"),
+        ("move_mantle", "Mantle"),
+        ("move_toe_hook", "Toe hook"),
+        ("move_heel_hook", "Heel hook"),
+        ("move_drop_knee", "Drop-knee"),
+        ("move_smear", "Smear"),
+    ],
+}
 
 
 def transparent(color: str, alpha: float = 0.12) -> str:
@@ -1418,6 +1476,94 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
         st.caption("Specialist ratings appear only when the athlete has enough matching round evidence.")
 
 
+def physical_transfer_figure(
+    frame: pd.DataFrame,
+    x: str,
+    y: str,
+    title: str,
+    selected: list[str] | None = None,
+) -> tuple[go.Figure, float, bool]:
+    """Plot the fitted test-to-rating line and cautious athlete transfer residuals."""
+    plot = frame.dropna(subset=[x, y]).copy()
+    plot[x] = pd.to_numeric(plot[x], errors="coerce")
+    plot[y] = pd.to_numeric(plot[y], errors="coerce")
+    plot = plot.dropna(subset=[x, y])
+    plot["name_key"] = plot["athlete_name"].map(plain_key)
+    rho = float(plot[x].rank().corr(plot[y].rank())) if len(plot) >= 3 else np.nan
+    usable = len(plot) >= 12 and plot[x].nunique() >= 4 and np.isfinite(rho) and rho >= 0.20
+    figure = go.Figure()
+    if plot.empty:
+        return figure, rho, False
+
+    slope, intercept = (
+        np.polyfit(plot[x], plot[y], 1)
+        if plot[x].nunique() >= 2 else (0.0, float(plot[y].median()))
+    )
+    plot["test_expected_rating"] = intercept + slope * plot[x]
+    plot["transfer_residual"] = plot[y] - plot["test_expected_rating"]
+    median_residual = float(plot["transfer_residual"].median())
+    mad = float((plot["transfer_residual"] - median_residual).abs().median())
+    residual_scale = 1.4826 * mad
+    if not np.isfinite(residual_scale) or residual_scale < 1:
+        residual_scale = float(plot["transfer_residual"].std(ddof=1))
+    threshold = max(50.0, 0.75 * residual_scale) if np.isfinite(residual_scale) else np.inf
+    plot["transfer_reading"] = "Near the test-only trend"
+    if usable:
+        plot.loc[
+            plot["transfer_residual"].gt(threshold), "transfer_reading"
+        ] = "Possible opportunity: performance ahead of this test"
+        plot.loc[
+            plot["transfer_residual"].lt(-threshold), "transfer_reading"
+        ] = "Possible lower transfer: test ahead of performance"
+    else:
+        plot["transfer_reading"] = "Relationship too weak for a training tag"
+
+    colors = {
+        "Possible opportunity: performance ahead of this test": PALETTE["coral"],
+        "Possible lower transfer: test ahead of performance": PALETTE["blue"],
+        "Near the test-only trend": "#A2B5B1",
+        "Relationship too weak for a training tag": "#C7D0CE",
+    }
+    selected_keys = {plain_key(name) for name in (selected or [])}
+    for reading, group in plot.groupby("transfer_reading", sort=False):
+        labels = [
+            friendly_name(name) if key in selected_keys else ""
+            for name, key in zip(group["athlete_name"], group["name_key"])
+        ]
+        line_widths = [3 if key in selected_keys else 0 for key in group["name_key"]]
+        figure.add_trace(go.Scatter(
+            x=group[x], y=group[y], mode="markers+text", text=labels,
+            textposition="top center", name=reading,
+            marker={
+                "size": 11, "opacity": 0.75, "color": colors.get(reading, "#A2B5B1"),
+                "line": {"width": line_widths, "color": PALETTE["ink"]},
+            },
+            customdata=np.column_stack([
+                group["athlete_name"], group["test_expected_rating"],
+                group["transfer_residual"],
+            ]),
+            hovertemplate=(
+                "%{customdata[0]}<br>Test result: %{x:.2f}<br>Actual rating: %{y:.0f}"
+                "<br>Rating expected from this test alone: %{customdata[1]:.0f}"
+                "<br>Difference: %{customdata[2]:+.0f} Elo<extra>%{fullData.name}</extra>"
+            ),
+        ))
+    x_line = np.array([float(plot[x].min()), float(plot[x].max())])
+    figure.add_trace(go.Scatter(
+        x=x_line, y=intercept + slope * x_line, mode="lines",
+        line={"color": PALETTE["ink"], "width": 2, "dash": "dash"},
+        name="Rating expected from this test alone",
+        hoverinfo="skip",
+    ))
+    figure.update_layout(
+        title=title,
+        xaxis_title=x.replace("_", " ").title(), yaxis_title=y,
+        height=590, legend_title="Test-to-performance reading",
+        margin={"l": 20, "r": 20, "t": 70, "b": 30},
+    )
+    return figure, rho, usable
+
+
 def render_physical_strength(
     athletes: pd.DataFrame, selected: list[str], data: dict[str, pd.DataFrame]
 ) -> None:
@@ -1650,17 +1796,27 @@ def render_physical_strength(
         if plot.empty:
             st.info("No linked competition rating is available for this test yet.")
         else:
-            figure = px.scatter(
-                plot, x="value", y=rating, color="pool", hover_name="athlete_name",
-                hover_data=["test_date", "unit", "age", "identity_status"],
-                title=f"{test} and current {rating}",
+            figure, current_rho, transfer_usable = physical_transfer_figure(
+                plot, "value", rating, f"{test} and current {rating}", selected
             )
-            figure.update_traces(marker={"size": 10, "opacity": 0.68})
-            figure.update_layout(height=560)
             st.plotly_chart(figure, width="stretch", theme=None)
+            if transfer_usable:
+                st.info(
+                    f"Current athlete-level rank relationship: {current_rho:.2f}. Athletes above "
+                    "the dashed line perform better than this test alone predicts and may have a "
+                    "physical opportunity if the quality is trainable and truly limiting. Athletes "
+                    "below it already test ahead of performance; more of the same quality may have "
+                    "lower transfer than technical, tactical or style-specific work."
+                )
+            else:
+                st.warning(
+                    f"Current athlete-level rank relationship: {current_rho:.2f}. It is too weak "
+                    "or too sparse for athlete opportunity labels, so the line is descriptive only."
+                )
             st.caption(
-                f"{plot['testing_person_key'].nunique()} linked athletes. This is a current "
-                "association view; use Population priorities for the harder future-performance test."
+                f"{plot['testing_person_key'].nunique()} linked athletes. Residual tags are screening "
+                "hypotheses, not causal training prescriptions. Use Population priorities for the "
+                "harder frozen future-performance test."
             )
         coverage = latest.groupby(["metric_category", "test_name"], as_index=False).agg(
             athletes=("testing_person_key", "nunique"),
@@ -1712,24 +1868,21 @@ def render_physical_strength(
         plot[value_column] = pd.to_numeric(plot[value_column], errors="coerce")
         plot[rating] = pd.to_numeric(plot[rating], errors="coerce")
         plot = plot.dropna(subset=[value_column, rating])
-        figure = px.scatter(
-            plot, x=value_column, y=rating, hover_name="athlete_name",
-            color="gender" if "gender" in plot else None,
-            trendline=None,
-            title=f"{test} and {rating}",
+        figure, grade_rho, grade_transfer_usable = physical_transfer_figure(
+            plot, value_column, rating, f"{test} and {rating}", selected
         )
-        figure.update_traces(marker={"size": 10, "opacity": 0.68})
-        focus = plot.loc[plot["name_key"].isin({plain_key(name) for name in selected})]
-        for index, (_, row) in enumerate(focus.iterrows()):
-            figure.add_trace(go.Scatter(
-                x=[row[value_column]], y=[row[rating]], mode="markers+text",
-                text=[friendly_name(row["athlete_name"])], textposition="top center",
-                marker={"size": 15, "color": ATHLETE_COLORS[index % len(ATHLETE_COLORS)],
-                        "line": {"width": 2, "color": PALETTE["ink"]}},
-                name=friendly_name(row["athlete_name"]),
-            ))
-        figure.update_layout(height=540)
         st.plotly_chart(figure, width="stretch", theme=None)
+        if grade_transfer_usable:
+            st.info(
+                f"Current athlete-level rank relationship: {grade_rho:.2f}. The dashed line shows "
+                "the rating expected from this self-report alone; large differences identify "
+                "questions to investigate, not proof of a limiter."
+            )
+        else:
+            st.warning(
+                f"Current athlete-level rank relationship: {grade_rho:.2f}. This relationship "
+                "is too weak or sparse for individual opportunity labels."
+            )
         st.caption(
             f"{len(plot)} linked athletes are visible for this exact grade × rating pair. "
             "Grade values are converted to the common V-scale used in the testing source."
@@ -2028,6 +2181,284 @@ def render_style_tagging(history: pd.DataFrame) -> None:
         )
 
 
+def style_tag_backend_url() -> str:
+    """Return the optional durable-write endpoint without requiring secrets locally."""
+    try:
+        return str(st.secrets.get("STYLE_TAG_WEBHOOK_URL", "")).strip()
+    except (FileNotFoundError, KeyError):
+        return ""
+
+
+def save_style_tag_remotely(
+    url: str, record: dict[str, object], image_bytes: bytes
+) -> tuple[bool, str]:
+    """Write one tag and its optional image to a Google Apps Script endpoint."""
+    payload = {
+        "record": record,
+        "image_base64": base64.b64encode(image_bytes).decode("ascii") if image_bytes else "",
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urlrequest.Request(
+        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urlrequest.urlopen(request, timeout=25) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        return bool(result.get("ok")), str(result.get("message", "Saved"))
+    except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return False, f"Remote save failed: {exc}"
+
+
+def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> None:
+    """Collect structured Zone/Top demand ratings for a boulder."""
+    st.header("Boulder Style Tagging")
+    st.write(
+        "Score what the boulder demands, not the athlete who climbed it. "
+        "Orange always describes the Top section; blue describes the Zone section."
+    )
+    st.markdown(
+        """
+        <style>
+        div[data-baseweb="select"] > div{min-height:3rem}
+        [role="listbox"]{min-width:min(950px,94vw)!important}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.expander("Scoring guide and independent definitions", expanded=False):
+        st.markdown(
+            "- **0 - absent:** not meaningfully present.\n"
+            "- **1 - present:** useful, but not defining.\n"
+            "- **2 - important:** likely changes who succeeds.\n"
+            "- **3 - dominant:** central to executing the section.\n\n"
+            f"**Physical:** {STYLE_DEFINITIONS['physical']}\n\n"
+            f"**Technical:** {STYLE_DEFINITIONS['technical']}\n\n"
+            f"**Coordination:** {STYLE_DEFINITIONS['coordination']}"
+        )
+
+    event_catalog = pd.DataFrame(columns=["event_name", "event_date", "label"])
+    if not history.empty and "event_name" in history:
+        dated = history.copy()
+        dated["event_name"] = dated["event_name"].fillna("").astype(str).str.strip()
+        dated["event_date"] = pd.to_datetime(dated.get("event_date"), errors="coerce")
+        event_catalog = (
+            dated.loc[dated["event_name"].ne(""), ["event_name", "event_date"]]
+            .drop_duplicates()
+            .sort_values(["event_date", "event_name"], ascending=[False, True])
+        )
+        event_catalog["date_label"] = event_catalog["event_date"].dt.strftime("%Y-%m-%d")
+        event_catalog["date_label"] = event_catalog["date_label"].fillna("Date unknown")
+        event_catalog["label"] = event_catalog["date_label"] + " - " + event_catalog["event_name"]
+
+    search = st.text_input(
+        "Find a competition",
+        placeholder="Type any part of its date or name, e.g. 2026-06 or Prague",
+        help="Partial dates and names are accepted. Clear this field to see recent events.",
+    ).strip()
+    filtered_catalog = event_catalog
+    if search and not event_catalog.empty:
+        normalized = unicodedata.normalize("NFKD", search).encode("ascii", "ignore").decode().lower()
+        search_values = event_catalog["label"].map(
+            lambda value: unicodedata.normalize("NFKD", str(value))
+            .encode("ascii", "ignore").decode().lower()
+        )
+        filtered_catalog = event_catalog.loc[search_values.str.contains(normalized, regex=False)]
+    event_labels = filtered_catalog["label"].head(150).tolist()
+    event_options = ["Custom competition", *event_labels]
+    event_lookup = event_catalog.set_index("label")[["event_name", "event_date"]].to_dict("index")
+    if search and not event_labels:
+        st.info("No matching event. Choose Custom competition and enter it below.")
+
+    image_file = st.file_uploader(
+        "Boulder image", type=["png", "jpg", "jpeg", "webp"],
+        help="Use a full-wall or close route image where the hold sequence is readable.",
+    )
+    if image_file is not None:
+        st.image(image_file, caption=image_file.name, width="stretch")
+
+    add_optional_tags = st.checkbox(
+        "I would like to help further and identify tags",
+        value=False,
+        help="Optional: add hold, foothold, physical, technical and movement demands.",
+    )
+
+    def paired_sliders(container, label: str, key: str, help_text: str = "") -> tuple[int, int]:
+        container.markdown(f"**{label}**")
+        top_value = container.slider(
+            f"🟠 Top - {label}", 0, 3, 0, key=f"style_top_{key}", help=help_text or None
+        )
+        zone_value = container.slider(
+            f"🔵 Zone - {label}", 0, 3, 0, key=f"style_zone_{key}", help=help_text or None
+        )
+        return top_value, zone_value
+
+    with st.form("style_tag_form_v2", clear_on_submit=False):
+        event_choice = st.selectbox(
+            "Competition", event_options,
+            help="Results show the complete date and competition name.",
+        )
+        custom_event = st.text_input(
+            "Custom competition name", disabled=event_choice != "Custom competition"
+        )
+        context = st.columns(3)
+        round_name = context[0].selectbox(
+            "Round", ["Qualification", "Semi-final", "Final", "Other"]
+        )
+        gender = context[1].selectbox(
+            "Gender terrain", ["Men", "Women", "Mixed / unknown"]
+        )
+        boulder_number = context[2].text_input("Boulder", placeholder="e.g. M3 or W2")
+
+        st.markdown("#### Core style profile")
+        st.caption("Rate each factor separately for the section ending at Zone and the section ending at Top.")
+        core_scores: dict[str, tuple[int, int]] = {}
+        core_columns = st.columns(4)
+        core_scores["physical"] = paired_sliders(
+            core_columns[0], "Physical", "physical", STYLE_DEFINITIONS["physical"]
+        )
+        core_scores["technical"] = paired_sliders(
+            core_columns[1], "Technical", "technical", STYLE_DEFINITIONS["technical"]
+        )
+        core_scores["coordination"] = paired_sliders(
+            core_columns[2], "Coordination", "coordination", STYLE_DEFINITIONS["coordination"]
+        )
+        core_scores["verticality"] = paired_sliders(
+            core_columns[3], "Wall angle", "verticality",
+            "0 slab · 1 vertical · 2 overhang · 3 roof / very steep",
+        )
+        direction_columns = st.columns(2)
+        top_direction = direction_columns[0].selectbox(
+            "🟠 Top direction", ["Up", "Diagonal", "Sideways", "Mixed / unclear"]
+        )
+        zone_direction = direction_columns[1].selectbox(
+            "🔵 Zone direction", ["Up", "Diagonal", "Sideways", "Mixed / unclear"]
+        )
+
+        optional_scores: dict[str, tuple[int, int]] = {}
+        if add_optional_tags:
+            st.markdown("#### Optional tags")
+            st.caption("Leave any tag at 0 when it is absent or you are unsure.")
+            for theme, items in STYLE_TAG_GROUPS.items():
+                with st.expander(theme, expanded=theme in {"Physical qualities", "Handholds"}):
+                    columns = st.columns(min(4, len(items)))
+                    for index, (tag_key, tag_label) in enumerate(items):
+                        optional_scores[tag_key] = paired_sliders(
+                            columns[index % len(columns)], tag_label, tag_key
+                        )
+
+        descriptions = st.columns(2)
+        zone_move = descriptions[0].text_area(
+            "Zone move / position (optional)",
+            placeholder="Only add information the standardized tags do not capture.",
+        )
+        top_move = descriptions[1].text_area(
+            "Top move / position (optional)",
+            placeholder="Only add information the standardized tags do not capture.",
+        )
+        notes = st.text_area(
+            "Other notes (optional)",
+            placeholder="Alternative beta, deceptive feature, image limitation, or uncertainty...",
+        )
+        confidence = st.select_slider(
+            "Tag confidence", options=["Low", "Moderate", "High"], value="Moderate"
+        )
+        contributor = st.text_input("Contributor name or initials (optional)")
+        submitted = st.form_submit_button("Save boulder tag", type="primary")
+
+    if "style_tag_rows" not in st.session_state:
+        st.session_state.style_tag_rows = []
+    if "style_tag_images" not in st.session_state:
+        st.session_state.style_tag_images = {}
+    backend_url = style_tag_backend_url()
+    if submitted:
+        selected_event = event_lookup.get(event_choice, {})
+        final_event = (
+            custom_event.strip() if event_choice == "Custom competition"
+            else str(selected_event.get("event_name", event_choice))
+        )
+        selected_date = selected_event.get("event_date")
+        final_date = pd.Timestamp(selected_date).date().isoformat() if pd.notna(selected_date) else ""
+        image_bytes = image_file.getvalue() if image_file is not None else b""
+        if len(image_bytes) > 10 * 1024 * 1024:
+            st.error("Please use an image smaller than 10 MB.")
+        elif not final_event or not boulder_number.strip():
+            st.error("Competition and boulder number are required.")
+        else:
+            image_hash = hashlib.sha256(image_bytes).hexdigest() if image_bytes else ""
+            suffix = Path(image_file.name).suffix.lower() if image_file is not None else ""
+            stored_image = f"images/{image_hash}{suffix}" if image_hash else ""
+            record: dict[str, object] = {
+                "schema_version": "2.0",
+                "submitted_at_utc": datetime.now(timezone.utc).isoformat(),
+                "competition": final_event,
+                "competition_date": final_date,
+                "round": round_name,
+                "gender_terrain": gender,
+                "boulder": boulder_number.strip(),
+                "image_name": image_file.name if image_file is not None else "",
+                "image_sha256": image_hash,
+                "image_in_bundle": stored_image,
+                "top_direction": top_direction,
+                "zone_direction": zone_direction,
+                "optional_tags_completed": add_optional_tags,
+                "zone_move": zone_move.strip(),
+                "top_move": top_move.strip(),
+                "notes": notes.strip(),
+                "confidence": confidence,
+                "contributor": contributor.strip(),
+            }
+            for score_key, (top_value, zone_value) in {**core_scores, **optional_scores}.items():
+                record[f"top_{score_key}_0_3"] = top_value
+                record[f"zone_{score_key}_0_3"] = zone_value
+            st.session_state.style_tag_rows.append(record)
+            if image_bytes and stored_image:
+                st.session_state.style_tag_images[stored_image] = image_bytes
+            if backend_url:
+                saved, message = save_style_tag_remotely(backend_url, record, image_bytes)
+                if saved:
+                    st.success("Saved to the shared tagging database. A session backup is also available below.")
+                else:
+                    st.warning(f"{message}. Download the session backup below; your entry is not lost.")
+            else:
+                st.success("Added to this session. Export it below to preserve the entry.")
+
+    records = pd.DataFrame(st.session_state.style_tag_rows)
+    if not records.empty:
+        st.markdown("#### Tags in this session")
+        st.dataframe(records, hide_index=True, width="stretch")
+        csv_bytes = records.to_csv(index=False).encode("utf-8")
+        bundle = json.dumps(records.to_dict("records"), ensure_ascii=False, indent=2)
+        downloads = st.columns(2)
+        downloads[0].download_button(
+            "Download CSV", csv_bytes, "boulder_style_tags_v2.csv", "text/csv",
+        )
+        downloads[1].download_button(
+            "Download JSON", bundle, "boulder_style_tags_v2.json", "application/json",
+        )
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("boulder_style_tags_v2.csv", csv_bytes)
+            archive.writestr("boulder_style_tags_v2.json", bundle.encode("utf-8"))
+            for image_path, saved_image_bytes in st.session_state.style_tag_images.items():
+                archive.writestr(image_path, saved_image_bytes)
+        st.download_button(
+            "Download complete backup (tags + images)", zip_buffer.getvalue(),
+            "boulder_style_tag_bundle_v2.zip", "application/zip",
+        )
+    if backend_url:
+        st.caption("Shared database connection active. Session exports remain available as a safety copy.")
+    else:
+        st.caption(
+            "Session storage is active. The standalone public app is ready to use a Google "
+            "Drive/Sheet write endpoint as soon as its deployment URL is configured."
+        )
+    if standalone:
+        st.info(
+            "This separate annotator keeps public tagging and image traffic away from the "
+            "performance dashboard."
+        )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Comp Climbing Projections",
@@ -2105,7 +2536,7 @@ def main() -> None:
     elif workspace == "Physical Strength":
         render_physical_strength(athletes, selected, data)
     elif workspace == "Tag Boulder Styles":
-        render_style_tagging(data["history"])
+        render_style_tagging_v2(data["history"])
     else:
         render_maths_behind(
             athletes, data["correlations"], data["calibration"], data
