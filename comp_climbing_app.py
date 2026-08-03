@@ -7,9 +7,13 @@ does not retain the full research warehouse in memory.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
+import hashlib
+import io
+import json
 from pathlib import Path
 import unicodedata
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -90,6 +94,9 @@ def read_data() -> dict[str, pd.DataFrame]:
         "physical_profiles": ("physical_test_profiles.csv", "csv"),
         "physical_associations": ("physical_test_associations.csv", "csv"),
         "physical_models": ("physical_model_summary.csv", "csv"),
+        "physical_latest": ("physical_all_tests_latest.csv", "csv"),
+        "physical_screen": ("physical_test_metric_screen.csv", "csv"),
+        "physical_priorities": ("physical_athlete_priorities.csv", "csv"),
         "model_backtest": ("model_backtest_summary.csv", "csv"),
         "sensitivity_metrics": ("latent_volatility_challenger_metrics.csv", "csv"),
         "sensitivity_status": ("latent_volatility_challenger_status.csv", "csv"),
@@ -1414,12 +1421,256 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
 def render_physical_strength(
     athletes: pd.DataFrame, selected: list[str], data: dict[str, pd.DataFrame]
 ) -> None:
-    st.header("Physical Strength")
-    st.caption(
-        "What testing and self-reported climbing grades explain about current Boulder "
-        "ratings. Associations describe shared patterns; they do not prove that changing "
-        "one test causes Elo to change."
+    st.header("Physical Strength and Training Priorities")
+    st.write(
+        "Use the testing database for two decisions: which qualities deserve attention "
+        "across the pathway, and which qualities are plausible priorities for one athlete."
     )
+    view = st.segmented_control(
+        "Physical analysis",
+        ["Population priorities", "Athlete focus", "Explore all tests", "Climbing grades"],
+        default="Population priorities", label_visibility="collapsed",
+    )
+    latest = data.get("physical_latest", pd.DataFrame())
+    screen = data.get("physical_screen", pd.DataFrame())
+    priorities = data.get("physical_priorities", pd.DataFrame())
+
+    if view == "Population priorities":
+        if screen.empty:
+            st.info("The all-test future-performance screen is being rebuilt.")
+            return
+        evidence = screen.copy()
+        evidence["context_only"] = evidence["context_only"].astype(str).str.lower().eq("true")
+        evidence = evidence.loc[~evidence["context_only"]].copy()
+        evidence["future_adjusted_spearman"] = pd.to_numeric(
+            evidence["future_adjusted_spearman"], errors="coerce"
+        )
+        evidence["future_bootstrap_low"] = pd.to_numeric(
+            evidence["future_bootstrap_low"], errors="coerce"
+        )
+        evidence["future_bootstrap_high"] = pd.to_numeric(
+            evidence["future_bootstrap_high"], errors="coerce"
+        )
+        evidence = evidence.sort_values(
+            ["priority_weight", "future_adjusted_spearman"], ascending=False
+        )
+        promising = evidence.loc[evidence["evidence_tier"].eq("Promising predictive signal")]
+        exploratory = evidence.loc[evidence["evidence_tier"].eq("Exploratory signal")]
+        cards = st.columns(3)
+        cards[0].metric("Tests screened", f"{len(evidence)}")
+        cards[1].metric("Promising signals", f"{len(promising)}")
+        cards[2].metric("Exploratory signals", f"{len(exploratory)}")
+        if promising.empty:
+            st.warning(
+                "No physical test yet clears the full predictive gate. The highlighted "
+                "tests are assessment priorities—not proven training prescriptions."
+            )
+        plot = evidence.dropna(subset=["future_adjusted_spearman"]).head(14).sort_values(
+            "future_adjusted_spearman"
+        )
+        if not plot.empty:
+            tier_colors = {
+                "Promising predictive signal": PALETTE["teal"],
+                "Exploratory signal": PALETTE["gold"],
+                "Measured but unsettled": "#A8B6B3",
+                "Insufficient future evidence": "#D9E0DE",
+            }
+            figure = go.Figure()
+            for tier, group in plot.groupby("evidence_tier", sort=False):
+                low = group["future_adjusted_spearman"] - group["future_bootstrap_low"]
+                high = group["future_bootstrap_high"] - group["future_adjusted_spearman"]
+                figure.add_trace(go.Scatter(
+                    x=group["future_adjusted_spearman"], y=group["test_name"],
+                    mode="markers", name=tier,
+                    marker={"size": 11, "color": tier_colors.get(tier, "#A8B6B3")},
+                    error_x={
+                        "type": "data", "symmetric": False,
+                        "array": high.clip(lower=0), "arrayminus": low.clip(lower=0),
+                        "color": "#94A4A1", "thickness": 1,
+                    },
+                    customdata=np.column_stack([
+                        group["future_athletes"], group["mae_improvement"],
+                        group["metric_category"],
+                    ]),
+                    hovertemplate=(
+                        "%{y}<br>Adjusted future relationship: %{x:.2f}"
+                        "<br>Athletes: %{customdata[0]:.0f}"
+                        "<br>Prediction MAE improvement: %{customdata[1]:.1f} Elo"
+                        "<br>%{customdata[2]}<extra></extra>"
+                    ),
+                ))
+            figure.add_vline(x=0, line_dash="dot", line_color="#82918E")
+            figure.update_layout(
+                title="Does the test add information about later competition performance?",
+                xaxis_title="Age-, gender- and pre-event-Elo-adjusted rank relationship",
+                yaxis_title="", height=max(520, 34 * len(plot)),
+                legend_title="Evidence level", margin={"l": 20, "r": 20, "t": 70, "b": 30},
+            )
+            st.plotly_chart(figure, width="stretch", theme=None)
+        st.caption(
+            "Positive means higher test results tended to precede stronger Performance-ELO "
+            "than pre-event Elo, age and gender alone expected. The line is the athlete-level "
+            "bootstrap interval. Wide lines mean the database cannot yet separate signal from noise."
+        )
+        table = evidence[[
+            "test_name", "metric_category", "future_athletes",
+            "future_adjusted_spearman", "mae_improvement", "evidence_tier",
+            "coach_reading",
+        ]].rename(columns={
+            "test_name": "Test", "metric_category": "Quality",
+            "future_athletes": "Athletes with later results",
+            "future_adjusted_spearman": "Added future signal",
+            "mae_improvement": "Prediction error reduced (Elo)",
+            "evidence_tier": "Evidence", "coach_reading": "Coaching use",
+        })
+        st.dataframe(table, hide_index=True, width="stretch")
+        return
+
+    if view == "Athlete focus":
+        if priorities.empty:
+            st.info("Athlete testing priorities are being rebuilt.")
+            return
+        priorities = priorities.copy()
+        tested_options = sorted(
+            priorities["athlete_name"].dropna().astype(str).unique(), key=str.casefold
+        )
+        options: list[str] = []
+        seen_keys: set[str] = set()
+        for name in [*selected, *tested_options]:
+            key = plain_key(name)
+            if key and key not in seen_keys:
+                options.append(friendly_name(name))
+                seen_keys.add(key)
+        preferred_key = plain_key(selected[0]) if selected else plain_key(options[0])
+        default_index = next(
+            (index for index, option in enumerate(options) if plain_key(option) == preferred_key), 0
+        )
+        athlete_name = st.selectbox("Athlete", options, index=default_index)
+        athlete = priorities.loc[
+            priorities["athlete_name"].map(plain_key).eq(plain_key(athlete_name))
+        ].copy()
+        if athlete.empty:
+            st.info(
+                f"No physical-testing record is linked to {friendly_name(athlete_name)} yet. "
+                "Choose another athlete or add a testing session before drawing a physical profile."
+            )
+            return
+        physical = athlete.loc[~athlete["recommendation"].astype(str).str.startswith("Context")].copy()
+        physical["peer_percentile"] = pd.to_numeric(physical["peer_percentile"], errors="coerce")
+        physical["priority_score"] = pd.to_numeric(physical["priority_score"], errors="coerce")
+        focus = physical.loc[physical["recommendation"].eq("Focus candidate")]
+        strengths = physical.loc[physical["recommendation"].eq("Strength to protect")]
+        cards = st.columns(3)
+        cards[0].metric("Physical tests", f"{len(physical)}")
+        cards[1].metric("Focus candidates", f"{len(focus)}")
+        cards[2].metric("Strengths to protect", f"{len(strengths)}")
+        if focus.empty:
+            st.info(
+                "No clear physical limiter can be defended from the current data for this "
+                "athlete. Use the test history and climbing observations before changing training."
+            )
+        else:
+            first = focus.sort_values("priority_score", ascending=False).iloc[0]
+            st.success(
+                f"First quality to investigate: {first['test_name']} ({first['metric_category']}). "
+                f"This is a {first['certainty'].lower()} hypothesis, not a diagnosis."
+            )
+        ordered = pd.concat([
+            focus.sort_values("priority_score", ascending=False),
+            strengths.sort_values("peer_percentile", ascending=False),
+            physical.loc[~physical.index.isin(focus.index.union(strengths.index))]
+            .sort_values("test_date", ascending=False),
+        ]).drop_duplicates("test_name").head(16).sort_values("peer_percentile")
+        if not ordered.empty:
+            recommendation_colors = {
+                "Focus candidate": PALETTE["coral"],
+                "Strength to protect": PALETTE["teal"],
+                "Monitor; not a clear limiter": PALETTE["gold"],
+                "Evidence too uncertain to prescribe": "#A8B6B3",
+            }
+            figure = go.Figure()
+            for label, group in ordered.groupby("recommendation", sort=False):
+                figure.add_trace(go.Bar(
+                    x=100 * group["peer_percentile"], y=group["test_name"],
+                    orientation="h", name=label,
+                    marker_color=recommendation_colors.get(label, "#A8B6B3"),
+                    customdata=np.column_stack([
+                        group["value"], group["unit"], group["peer_athletes"],
+                        group["test_date"], group["certainty"],
+                    ]),
+                    hovertemplate=(
+                        "%{y}<br>Peer percentile: %{x:.0f}"
+                        "<br>Result: %{customdata[0]} %{customdata[1]}"
+                        "<br>Peer athletes: %{customdata[2]}"
+                        "<br>Test date: %{customdata[3]}"
+                        "<br>%{customdata[4]}<extra></extra>"
+                    ),
+                ))
+            figure.add_vline(x=35, line_dash="dot", line_color=PALETTE["coral"])
+            figure.add_vline(x=70, line_dash="dot", line_color=PALETTE["teal"])
+            figure.update_layout(
+                title=f"{friendly_name(athlete_name)} — physical profile against comparable peers",
+                xaxis={"title": "Percentile among same-gender peers (age ±2 years when available)",
+                       "range": [0, 100]},
+                yaxis_title="", barmode="overlay", height=max(520, 34 * len(ordered)),
+                margin={"l": 20, "r": 20, "t": 70, "b": 30},
+            )
+            st.plotly_chart(figure, width="stretch", theme=None)
+        shown = physical[[
+            "test_name", "metric_category", "test_date", "value", "unit",
+            "peer_percentile", "peer_athletes", "recommendation", "certainty",
+        ]].copy()
+        shown["peer_percentile"] = (100 * shown["peer_percentile"]).round(0)
+        shown = shown.rename(columns={
+            "test_name": "Test", "metric_category": "Quality", "test_date": "Date",
+            "value": "Result", "unit": "Unit", "peer_percentile": "Peer percentile",
+            "peer_athletes": "Peer athletes", "recommendation": "Decision",
+            "certainty": "Certainty",
+        })
+        st.dataframe(shown, hide_index=True, width="stretch")
+        st.caption(
+            "A focus candidate requires both a low peer result and a positive population signal. "
+            "It should be checked against movement style, training history, injury risk and response "
+            "to training before becoming a program priority."
+        )
+        return
+
+    if view == "Explore all tests":
+        if latest.empty:
+            st.info("The all-test explorer is being rebuilt.")
+            return
+        latest = latest.copy()
+        latest["value"] = pd.to_numeric(latest["value"], errors="coerce")
+        tests = sorted(latest["test_name"].dropna().astype(str).unique(), key=str.casefold)
+        test = st.selectbox("Test", tests)
+        rating = st.selectbox("Rating", ["Global-ELO", "IFSC-ELO", "WR-ELO"])
+        plot = latest.loc[latest["test_name"].eq(test)].copy()
+        plot[rating] = pd.to_numeric(plot[rating], errors="coerce")
+        plot = plot.dropna(subset=["value", rating])
+        if plot.empty:
+            st.info("No linked competition rating is available for this test yet.")
+        else:
+            figure = px.scatter(
+                plot, x="value", y=rating, color="pool", hover_name="athlete_name",
+                hover_data=["test_date", "unit", "age", "identity_status"],
+                title=f"{test} and current {rating}",
+            )
+            figure.update_traces(marker={"size": 10, "opacity": 0.68})
+            figure.update_layout(height=560)
+            st.plotly_chart(figure, width="stretch", theme=None)
+            st.caption(
+                f"{plot['testing_person_key'].nunique()} linked athletes. This is a current "
+                "association view; use Population priorities for the harder future-performance test."
+            )
+        coverage = latest.groupby(["metric_category", "test_name"], as_index=False).agg(
+            athletes=("testing_person_key", "nunique"),
+            latest_date=("test_date", "max"),
+        ).sort_values(["metric_category", "athletes"], ascending=[True, False])
+        st.dataframe(coverage, hide_index=True, width="stretch")
+        return
+
+    # Self-reported climbing grades remain useful context, but are not physical
+    # qualities and therefore never become training prescriptions by themselves.
     profiles = data.get("physical_profiles", pd.DataFrame())
     associations = data.get("physical_associations", pd.DataFrame())
     models = data.get("physical_models", pd.DataFrame())
@@ -1584,6 +1835,199 @@ def render_maths_behind(
     st.caption(correlation_note(correlations, "Global-ELO"))
 
 
+def render_style_tagging(history: pd.DataFrame) -> None:
+    """Public, structured boulder-demand tagging prototype.
+
+    Community Cloud's local disk is temporary, so records are kept in the
+    visitor's session and exported as a portable CSV/JSON bundle. This makes
+    the schema usable now without pretending that an ephemeral file is a
+    durable crowd database.
+    """
+    st.header("Boulder Style Tagging")
+    st.write(
+        "Turn a boulder image and a coach's reading into structured evidence. "
+        "Score the visible demand—not the athlete who climbed it."
+    )
+    with st.expander("How to score 0–3", expanded=False):
+        st.markdown(
+            "- **0 — absent:** the demand is not meaningfully present.\n"
+            "- **1 — present:** useful, but not a defining challenge.\n"
+            "- **2 — important:** likely changes who succeeds.\n"
+            "- **3 — dominant:** central to solving or executing the boulder.\n\n"
+            "**Physical** is decomposed into explosiveness, body tension and "
+            "overall strength. **Technical** is decomposed into slow precision, "
+            "curved coordination, reaction time and proprioception. The separate "
+            "**coordination** score describes how strongly linked movement timing "
+            "and momentum determine success."
+        )
+
+    event_names: list[str] = []
+    if not history.empty and "event_name" in history:
+        dated = history.copy()
+        dated["event_date"] = pd.to_datetime(dated["event_date"], errors="coerce")
+        event_names = (
+            dated.sort_values("event_date", ascending=False)["event_name"]
+            .dropna().astype(str).drop_duplicates().head(80).tolist()
+        )
+    event_options = ["Custom competition", *event_names]
+
+    image_file = st.file_uploader(
+        "Boulder image", type=["png", "jpg", "jpeg", "webp"],
+        help="Use a full-wall or close route image where the hold sequence is readable.",
+    )
+    if image_file is not None:
+        st.image(image_file, caption=image_file.name, width="stretch")
+
+    with st.form("style_tag_form", clear_on_submit=False):
+        top = st.columns(4)
+        event_choice = top[0].selectbox("Competition", event_options)
+        custom_event = top[0].text_input(
+            "Competition name", disabled=event_choice != "Custom competition"
+        )
+        round_name = top[1].selectbox(
+            "Round", ["Qualification", "Semi-final", "Final", "Other"]
+        )
+        gender = top[2].selectbox("Gender terrain", ["Men", "Women", "Mixed / unknown"])
+        boulder_number = top[3].text_input("Boulder", placeholder="e.g. M3 or W2")
+
+        st.markdown("#### Main style profile")
+        main = st.columns(4)
+        physical = main[0].slider("Physical", 0, 3, 1)
+        technical = main[1].slider("Technical", 0, 3, 1)
+        coordination = main[2].slider("Coordination", 0, 3, 1)
+        verticality = main[3].select_slider(
+            "Wall angle", options=[0, 1, 2, 3], value=1,
+            help="0 slab · 1 vertical · 2 overhang · 3 roof / very steep",
+        )
+
+        st.markdown("#### Why you gave those scores")
+        physical_cols = st.columns(3)
+        explosion = physical_cols[0].slider("Explosiveness", 0, 3, 0)
+        tension = physical_cols[1].slider("Body tension", 0, 3, 0)
+        strength = physical_cols[2].slider("Overall strength", 0, 3, 0)
+        technical_cols = st.columns(4)
+        slow_precision = technical_cols[0].slider("Slow precision", 0, 3, 0)
+        curved_coordination = technical_cols[1].slider("Curved coordination", 0, 3, 0)
+        reaction_time = technical_cols[2].slider("Reaction time", 0, 3, 0)
+        proprioception = technical_cols[3].slider("Proprioception", 0, 3, 0)
+
+        st.markdown("#### Movement sequence around the zone")
+        sequence = st.columns(3)
+        pre_zone = sequence[0].text_area(
+            "Up to 3 moves before zone", placeholder="1. …\n2. …\n3. …"
+        )
+        zone_move = sequence[1].text_area(
+            "Zone move / position", placeholder="How the zone is controlled"
+        )
+        post_zone = sequence[2].text_area(
+            "Up to 3 moves after zone", placeholder="1. …\n2. …\n3. …"
+        )
+        tags = st.multiselect(
+            "Movement and setting tags",
+            [
+                "Dyno", "Paddle", "Run-and-jump", "Deadpoint", "Toe hook",
+                "Heel hook", "Knee bar", "Compression", "Press", "Mantle",
+                "Rose move", "Drop-knee", "Flag", "Smear", "Volume walking",
+                "Swing control", "Foot-first", "Coordination catch",
+                "Low-percentage crux", "Complex beta", "Precision feet",
+            ],
+        )
+        notes = st.text_area(
+            "Coach notes (optional)",
+            placeholder="Likely beta, alternative beta, deceptive feature, or uncertainty…",
+        )
+        confidence = st.select_slider(
+            "Tag confidence", options=["Low", "Moderate", "High"], value="Moderate"
+        )
+        contributor = st.text_input("Contributor name or initials (optional)")
+        submitted = st.form_submit_button("Add tag to this session", type="primary")
+
+    if "style_tag_rows" not in st.session_state:
+        st.session_state.style_tag_rows = []
+    if "style_tag_images" not in st.session_state:
+        st.session_state.style_tag_images = {}
+    if submitted:
+        final_event = custom_event.strip() if event_choice == "Custom competition" else event_choice
+        image_bytes = image_file.getvalue() if image_file is not None else b""
+        if len(image_bytes) > 10 * 1024 * 1024:
+            st.error("Please use an image smaller than 10 MB.")
+        elif not final_event or not boulder_number.strip():
+            st.error("Competition and boulder number are required.")
+        else:
+            image_hash = hashlib.sha256(image_bytes).hexdigest() if image_bytes else ""
+            suffix = Path(image_file.name).suffix.lower() if image_file is not None else ""
+            stored_image = f"images/{image_hash}{suffix}" if image_hash else ""
+            record = {
+                "submitted_at_utc": datetime.now(timezone.utc).isoformat(),
+                "competition": final_event,
+                "round": round_name,
+                "gender_terrain": gender,
+                "boulder": boulder_number.strip(),
+                "image_name": image_file.name if image_file is not None else "",
+                "image_sha256": image_hash,
+                "image_in_bundle": stored_image,
+                "physical_0_3": physical,
+                "technical_0_3": technical,
+                "coordination_0_3": coordination,
+                "verticality_0_3": verticality,
+                "explosiveness_0_3": explosion,
+                "body_tension_0_3": tension,
+                "overall_strength_0_3": strength,
+                "slow_precision_0_3": slow_precision,
+                "curved_coordination_0_3": curved_coordination,
+                "reaction_time_0_3": reaction_time,
+                "proprioception_0_3": proprioception,
+                "moves_before_zone": pre_zone.strip(),
+                "zone_move": zone_move.strip(),
+                "moves_after_zone": post_zone.strip(),
+                "tags": " | ".join(tags),
+                "notes": notes.strip(),
+                "confidence": confidence,
+                "contributor": contributor.strip(),
+            }
+            st.session_state.style_tag_rows.append(record)
+            if image_bytes and stored_image:
+                st.session_state.style_tag_images[stored_image] = image_bytes
+            st.success("Tag added. Export the session below to preserve it.")
+
+    records = pd.DataFrame(st.session_state.style_tag_rows)
+    if not records.empty:
+        st.markdown("#### Tags in this session")
+        st.dataframe(records, hide_index=True, width="stretch")
+        csv_bytes = records.to_csv(index=False).encode("utf-8")
+        bundle = json.dumps(records.to_dict("records"), ensure_ascii=False, indent=2)
+        downloads = st.columns(2)
+        downloads[0].download_button(
+            "Download CSV", csv_bytes, "boulder_style_tags.csv", "text/csv",
+        )
+        downloads[1].download_button(
+            "Download JSON", bundle, "boulder_style_tags.json", "application/json",
+        )
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("boulder_style_tags.csv", csv_bytes)
+            archive.writestr("boulder_style_tags.json", bundle.encode("utf-8"))
+            for image_path, image_bytes in st.session_state.style_tag_images.items():
+                archive.writestr(image_path, image_bytes)
+        st.download_button(
+            "Download complete bundle (tags + images)", zip_buffer.getvalue(),
+            "boulder_style_tag_bundle.zip", "application/zip",
+        )
+    st.caption(
+        "Public prototype: tags remain in this browser session until exported. "
+        "A shared database will replace session storage after a durable write backend is connected."
+    )
+    with st.expander("How these tags improve the physical model"):
+        st.write(
+            "The next model will ask whether a test becomes more predictive as the tagged "
+            "demand rises—for example, whether relative finger force matters more on high-"
+            "strength or high-tension boulders. That interaction is more useful than asking "
+            "whether one physical test predicts every style equally. It requires these tags "
+            "plus problem-level tops, zones and attempts, and will be validated on athletes "
+            "and competitions the model did not fit."
+        )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Comp Climbing Projections",
@@ -1625,7 +2069,7 @@ def main() -> None:
         st.info("Select at least one athlete to begin.")
         st.stop()
     workspace = st.segmented_control(
-        "Workspace", ["Overview", "Physical Strength", "Maths behind"],
+        "Workspace", ["Overview", "Physical Strength", "Tag Boulder Styles", "Maths behind"],
         default="Overview", label_visibility="collapsed",
     )
     if workspace == "Overview":
@@ -1659,6 +2103,8 @@ def main() -> None:
         renderers[section]()
     elif workspace == "Physical Strength":
         render_physical_strength(athletes, selected, data)
+    elif workspace == "Tag Boulder Styles":
+        render_style_tagging(data["history"])
     else:
         render_maths_behind(
             athletes, data["correlations"], data["calibration"], data

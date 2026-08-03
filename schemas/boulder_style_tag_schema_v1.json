@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://comp-climbing-projections.streamlit.app/schemas/boulder_style_tag_schema_v1.json",
+  "title": "Comp Climbing Projections Boulder Style Tag",
+  "description": "Public coach-entered boulder-demand observation. Scores describe terrain demand, not athlete ability.",
+  "type": "object",
+  "required": [
+    "submitted_at_utc",
+    "competition",
+    "round",
+    "gender_terrain",
+    "boulder",
+    "physical_0_3",
+    "technical_0_3",
+    "coordination_0_3",
+    "verticality_0_3",
+    "confidence"
+  ],
+  "properties": {
+    "submitted_at_utc": {"type": "string", "format": "date-time"},
+    "competition": {"type": "string", "minLength": 1},
+    "round": {"enum": ["Qualification", "Semi-final", "Final", "Other"]},
+    "gender_terrain": {"enum": ["Men", "Women", "Mixed / unknown"]},
+    "boulder": {"type": "string", "minLength": 1},
+    "image_name": {"type": "string"},
+    "image_sha256": {"type": "string", "pattern": "^$|^[a-f0-9]{64}$"},
+    "image_in_bundle": {"type": "string"},
+    "physical_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "technical_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "coordination_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "verticality_0_3": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3,
+      "description": "0 slab, 1 vertical, 2 overhang, 3 roof or very steep"
+    },
+    "explosiveness_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "body_tension_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "overall_strength_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "slow_precision_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "curved_coordination_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "reaction_time_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "proprioception_0_3": {"type": "integer", "minimum": 0, "maximum": 3},
+    "moves_before_zone": {"type": "string"},
+    "zone_move": {"type": "string"},
+    "moves_after_zone": {"type": "string"},
+    "tags": {"type": "string"},
+    "notes": {"type": "string"},
+    "confidence": {"enum": ["Low", "Moderate", "High"]},
+    "contributor": {"type": "string"}
+  },
+  "additionalProperties": false
+}
+

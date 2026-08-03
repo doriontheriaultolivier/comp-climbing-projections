@@ -28,6 +28,22 @@ The top ribbon supports three individual athletes, EEQ, Canadian 2026 Youth
 Worlds participants, or a clearly labelled CNR top-15 national-team proxy.
 The official national-team roster will replace that proxy when supplied.
 
+## Physical priorities and style tagging
+
+The **Physical Strength** workspace separates population evidence from an
+individual athlete review. A test becomes a focus candidate only when it has a
+positive future-performance signal and the athlete is low relative to suitable
+peers. The current signals remain exploratory and are labelled accordingly;
+the interface does not turn a correlation into a training prescription.
+
+The public **Tag Boulder Styles** workspace records a boulder image, competition,
+round, gender terrain, physical/technical/coordination demand, wall angle,
+movement sequence around the zone, detailed demand scores and confidence.
+Visitors can export CSV, JSON or a complete ZIP containing images. Community
+Cloud storage is temporary, so this release deliberately keeps tags in the
+visitor session until a durable shared write backend is connected. The machine
+contract is in [the style-tag schema](schemas/boulder_style_tag_schema_v1.json).
+
 ## Rating contract
 
 `Global-ELO` uses every de-duplicated local, national, international, youth

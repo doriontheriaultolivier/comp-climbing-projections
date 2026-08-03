@@ -69,8 +69,18 @@ class AppSmokeTests(unittest.TestCase):
         )
         workspace.set_value("Physical Strength").run(timeout=120)
         self.assertFalse(app.exception)
-        self.assertIn("Physical Strength", [item.value for item in app.header])
+        self.assertIn(
+            "Physical Strength and Training Priorities",
+            [item.value for item in app.header],
+        )
         self.assertGreaterEqual(len(app.get("plotly_chart")), 1)
+
+        workspace = next(
+            item for item in app.segmented_control if item.label == "Workspace"
+        )
+        workspace.set_value("Tag Boulder Styles").run(timeout=120)
+        self.assertFalse(app.exception)
+        self.assertIn("Boulder Style Tagging", [item.value for item in app.header])
 
     def test_four_governed_outcome_reference_lines(self) -> None:
         calibration = pd.read_csv(ROOT / "data" / "boulder_elo_calibration.csv")
