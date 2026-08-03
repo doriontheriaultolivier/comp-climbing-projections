@@ -15,8 +15,24 @@ def event_history() -> pd.DataFrame:
         "round_group", "confirmed_procedure", "pool",
     ]
     compact_path = DATA / "style_event_catalog.csv"
+    inventory_path = DATA / "boulder_round_inventory.csv"
     if compact_path.exists():
-        return pd.read_csv(compact_path, low_memory=False)
+        compact = pd.read_csv(compact_path, low_memory=False)
+        if inventory_path.exists():
+            inventory = pd.read_csv(inventory_path, low_memory=False)
+            procedure_keys = [
+                "source_scope", "source_event_id", "event_name", "event_date",
+                "pool", "round_group",
+            ]
+            available_keys = [
+                key for key in procedure_keys
+                if key in compact.columns and key in inventory.columns
+            ]
+            procedure = compact[
+                [*available_keys, "confirmed_procedure"]
+            ].drop_duplicates(available_keys)
+            return inventory.merge(procedure, on=available_keys, how="left")
+        return compact
     path = DATA / "boulder_overview_history.parquet"
     if not path.exists():
         return pd.DataFrame(columns=columns)

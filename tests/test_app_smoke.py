@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from streamlit.testing.v1 import AppTest
 
 from comp_climbing_app import (
+    _governed_boulder_count,
     _saturation_cv_comparison,
     add_outcome_thresholds,
     physical_sufficiency_table,
@@ -104,8 +105,8 @@ class AppSmokeTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(app.title[0].value, "Comp Climbing Boulder Tags")
         slider_labels = {item.label for item in app.slider}
-        self.assertIn("Top Physical", slider_labels)
-        self.assertIn("Zone Physical", slider_labels)
+        self.assertIn("After zone Physical", slider_labels)
+        self.assertIn("Before zone Physical", slider_labels)
         self.assertNotIn("Up to 3 moves before zone", {item.label for item in app.text_area})
 
         optional = next(
@@ -115,8 +116,61 @@ class AppSmokeTests(unittest.TestCase):
         optional.set_value(True).run(timeout=120)
         self.assertFalse(app.exception)
         slider_labels = {item.label for item in app.slider}
-        self.assertIn("Top Slopers", slider_labels)
-        self.assertIn("Zone Dyno", slider_labels)
+        self.assertIn("After zone Slopers", slider_labels)
+        self.assertIn("Before zone Dyno", slider_labels)
+
+    def test_governed_boulder_count_prefers_exact_source_metadata(self) -> None:
+        rows = pd.DataFrame({
+            "boulder_count": [6, 6],
+            "boulder_count_status": ["source-confirmed", "source-confirmed"],
+            "boulder_count_source": ["normalized results n_routes"] * 2,
+        })
+        result = _governed_boulder_count(
+            rows, pd.Series([5]), round_name="Qualification"
+        )
+        self.assertEqual(result["count"], 6)
+        self.assertEqual(result["status"], "source-confirmed")
+        self.assertFalse(result["editable"])
+
+    def test_governed_boulder_count_exposes_conflict(self) -> None:
+        rows = pd.DataFrame({
+            "boulder_count": [4, 5],
+            "boulder_count_status": ["source-confirmed", "source-confirmed"],
+            "boulder_count_source": ["normalized results n_routes"] * 2,
+        })
+        result = _governed_boulder_count(rows, round_name="Final")
+        self.assertEqual(result["status"], "source-conflict")
+        self.assertTrue(result["editable"])
+
+    def test_canadian_shared_youth_terrain_has_source_count_six(self) -> None:
+        inventory = pd.read_csv(ROOT / "data" / "boulder_round_inventory.csv")
+        rows = inventory.loc[
+            inventory["event_name"].str.contains(
+                "2025-26 Youth Nationals - Boulder", case=False, na=False
+            )
+            & inventory["terrain_group"].eq(
+                "Youth A + Junior (shared Canadian terrain)"
+            )
+            & inventory["gender"].eq("Men")
+            & inventory["round_group"].eq("Qualification")
+        ]
+        self.assertEqual(set(rows["boulder_count"]), {6})
+        self.assertEqual(set(rows["boulder_count_status"]), {"source-confirmed"})
+        self.assertEqual(set(rows["category"].astype(str)), {"U19 Male", "U21 Male"})
+
+    def test_youth_world_categories_never_use_canadian_shared_terrain(self) -> None:
+        inventory = pd.read_csv(ROOT / "data" / "boulder_round_inventory.csv")
+        youth_worlds = inventory.loc[
+            inventory["source_scope"].eq("IFSC")
+            & inventory["event_name"].str.contains(
+                "Youth Championship", case=False, na=False
+            )
+        ]
+        self.assertFalse(
+            youth_worlds["terrain_group"].eq(
+                "Youth A + Junior (shared Canadian terrain)"
+            ).any()
+        )
 
     def test_style_tagger_save_and_next_boulder(self) -> None:
         app = AppTest.from_file(str(ROOT / "style_tagging_app.py"))

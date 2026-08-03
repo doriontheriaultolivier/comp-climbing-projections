@@ -2779,24 +2779,33 @@ def render_maths_behind(
         "attempt-level failure evidence and enough repeated boulders. Until then the app says "
         "capacity candidate, likely sufficient, or unresolved—never 'train this' from one residual."
     )
-    st.markdown("#### Physical-ELO: the governed next step")
+    st.markdown("#### Style Elo: each boulder is a mini-round")
     st.write(
-        "Physical-ELO will be a separate style-specific rating, not a relabelled Global-ELO. "
-        "A round will affect it in proportion to the tagged physical demand of its boulders, "
-        "while athlete updates remain zero-sum inside the same field. Technical and "
-        "coordination ratings will use the same structure. This preserves the common World-"
-        "readiness scale while asking a narrower question: who performs better when this "
-        "demand is high?"
+        "Physical-, Technical- and Coordination-Elo will be separate ratings, not relabelled "
+        "Global-Elo. Every boulder becomes one mini-round, divided into start→zone and "
+        "zone→top. Missing the zone is not counted as failure after the zone: that second "
+        "segment is unobserved for the athlete. This keeps an early failure from falsely "
+        "diagnosing the top section."
     )
     st.latex(
-        r"\Delta R^{phys}_{i,e}=q_e\,d^{phys}_e\,K_{i,e}(S_{i,e}-E_{i,e}),"
-        r"\qquad d^{phys}_e=\frac{1}{B_e}\sum_{b=1}^{B_e}\frac{P_{b,Z}+P_{b,T}}{6}"
+        r"\Delta R^s_{i,e}=\frac{q_eK_{i,e}}{B_e}\sum_{b=1}^{B_e}"
+        r"\left[w_Zd^s_{b,Z}r_{i,b,Z}+w_Td^s_{b,T}r_{i,b,T}\right],"
+        r"\qquad w_Z+w_T=1"
     )
     st.caption(
-        "q is event-quality weight; d is tagged physical demand across B boulders; S-E is "
-        "the usual observed-minus-expected result. Promotion requires enough independent "
-        "taggers, inter-rater agreement, and a frozen next-event backtest beating Global-ELO "
-        "on high-physical rounds. Until then, style focus remains a hypothesis."
+        "s is physical, technical or coordination; B is the source-confirmed boulder count; "
+        "d is the 0–3 demand tag converted to 0–1; r is observed minus expected evidence; "
+        "and q is event quality. Dividing by B prevents a six-boulder round from carrying 50% "
+        "more total weight than a four-boulder round. Paired athlete updates are symmetric, "
+        "so the field remains zero-sum. Start→zone uses every starter. Zone→top is conditional "
+        "on reaching zone. Initial segment weights are ½ and ½; frozen backtests may change "
+        "them, but their sum stays one."
+    )
+    st.info(
+        "Production gate: publish style Elo only after boulder outcomes are joined to stable "
+        "boulder IDs, independent taggers agree sufficiently, and frozen next-event tests show "
+        "that the style rating adds predictive value beyond Global-Elo. Until then it is a "
+        "research layer, not a selection score."
     )
     st.markdown("#### How this fits the climbing literature")
     st.markdown(
@@ -3407,6 +3416,64 @@ def _tag_boulder_number(value: object) -> int | None:
     return int(fallback.group(0)) if fallback else None
 
 
+def _tag_uid(*values: object) -> str:
+    """Return a stable, compact ID for a tagged terrain entity."""
+    canonical = "|".join(plain_key(value) for value in values)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:20]
+
+
+def _governed_boulder_count(
+    round_rows: pd.DataFrame, recorded_counts: pd.Series | None = None,
+    round_name: str = "",
+) -> dict[str, object]:
+    """Resolve a round count without presenting an assumption as observed data."""
+    if round_rows.empty or "boulder_count" not in round_rows:
+        counts = pd.Series(dtype=float)
+        statuses: set[str] = set()
+        sources: list[str] = []
+    else:
+        counts = pd.to_numeric(round_rows["boulder_count"], errors="coerce").dropna()
+        counts = counts.loc[counts.gt(0)].astype(int)
+        statuses = set(round_rows.get(
+            "boulder_count_status", pd.Series("unknown", index=round_rows.index)
+        ).dropna().astype(str))
+        sources = sorted(set(round_rows.get(
+            "boulder_count_source", pd.Series("", index=round_rows.index)
+        ).dropna().astype(str)) - {""})
+    distinct = sorted(counts.unique().tolist())
+    if len(distinct) == 1 and statuses == {"source-confirmed"}:
+        return {
+            "count": distinct[0], "status": "source-confirmed", "editable": False,
+            "source": "; ".join(sources) or "normalized results metadata",
+            "candidates": distinct,
+        }
+    if len(distinct) > 1 or "source-conflict" in statuses:
+        return {
+            "count": max(distinct) if distinct else 4, "status": "source-conflict",
+            "editable": True, "source": "; ".join(sources) or "conflicting source metadata",
+            "candidates": distinct,
+        }
+    if distinct:
+        return {
+            "count": distinct[0], "status": "format-assumption", "editable": True,
+            "source": "; ".join(sources) or "round-format assumption", "candidates": distinct,
+        }
+    if recorded_counts is not None:
+        recorded = pd.to_numeric(recorded_counts, errors="coerce").dropna()
+        recorded = recorded.loc[recorded.gt(0)].astype(int)
+        if not recorded.empty:
+            values = sorted(recorded.unique().tolist())
+            return {
+                "count": max(values), "status": "contributor-proposed", "editable": True,
+                "source": "prior contributor response", "candidates": values,
+            }
+    return {
+        "count": 5 if round_name == "Qualification" else 4,
+        "status": "unknown", "editable": True,
+        "source": "no source count available", "candidates": [],
+    }
+
+
 def _tag_records_frame(records: list[dict[str, object]]) -> pd.DataFrame:
     frame = pd.DataFrame(records)
     if frame.empty:
@@ -3445,7 +3512,8 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
     """Fast public workflow for event/round/boulder demand annotation."""
     st.header("Boulder Style Tagging")
     st.caption(
-        "Choose the terrain once, score Zone and Top quickly, then move directly to the next boulder."
+        "Choose the terrain once, score start→zone and zone→top separately, then move directly "
+        "to the next boulder. Each boulder becomes one mini-round for future style Elo."
     )
     st.markdown(
         """
@@ -3625,6 +3693,16 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
     if gender is None:
         gender = available_genders[0]
 
+    governed_rows = round_rows.copy()
+    if not governed_rows.empty and "gender" in governed_rows:
+        governed_rows = governed_rows.loc[
+            governed_rows["gender"].astype(str).eq(gender)
+        ]
+    if not governed_rows.empty and "terrain_group" in governed_rows:
+        governed_rows = governed_rows.loc[
+            governed_rows["terrain_group"].astype(str).eq(terrain_group)
+        ]
+
     def context_counts(target_round: str, target_gender: str) -> str:
         subset = records.loc[
             _tag_context_mask(
@@ -3648,22 +3726,65 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
     st.caption(f"Gender responses — {gender_progress}")
 
     count_key = plain_key("|".join([chosen_event, round_name, gender, terrain_group]))
-    default_count = 5 if round_name == "Qualification" else 4
     matching = records.loc[_tag_context_mask(records, chosen_event, round_name, gender, terrain_group)]
     recorded_counts = pd.to_numeric(matching.get("expected_boulders"), errors="coerce").dropna()
-    if not recorded_counts.empty:
-        default_count = int(recorded_counts.max())
-    with st.expander("Confirm boulder count", expanded=False):
-        expected_boulders = int(st.number_input(
-            "Boulders in this round", min_value=1, max_value=12, value=default_count,
-            step=1, key=f"tag_count_{count_key}",
-            help="The format default is proposed; correct it here when the published round differs.",
-        ))
-        st.caption("Qualification defaults to 5; semi-final/final to 4 until event metadata confirms otherwise.")
-    if f"tag_count_{count_key}" in st.session_state:
-        expected_boulders = int(st.session_state[f"tag_count_{count_key}"])
-    else:
+    count_evidence = _governed_boulder_count(
+        governed_rows, recorded_counts, round_name=round_name
+    )
+    default_count = int(count_evidence["count"])
+    count_status = str(count_evidence["status"])
+    count_source = str(count_evidence["source"])
+    count_candidates = list(count_evidence["candidates"])
+    if not bool(count_evidence["editable"]):
         expected_boulders = default_count
+        st.success(
+            f"{expected_boulders} boulders in this terrain · confirmed by the results source",
+            icon="✅",
+        )
+    else:
+        if count_status == "source-conflict":
+            details = f" ({', '.join(map(str, count_candidates))})" if count_candidates else ""
+            st.warning(
+                f"The source contains conflicting boulder counts{details}. "
+                "Choose the count visible in the official round."
+            )
+        elif count_status == "format-assumption":
+            st.info(
+                f"{default_count} boulders is a format-based proposal; this older round has no "
+                "source-confirmed count."
+            )
+        elif count_status == "contributor-proposed":
+            st.info(f"{default_count} boulders was proposed in an earlier response; verify it once.")
+        else:
+            st.warning("No boulder count is available in the source metadata. Confirm it before tagging.")
+        expected_boulders = int(st.number_input(
+            "Boulders in this terrain", min_value=1, max_value=12, value=default_count,
+            step=1, key=f"tag_count_{count_key}",
+            help="A correction is stored as contributor-proposed evidence, not source-confirmed metadata.",
+        ))
+        if expected_boulders != default_count:
+            count_status = "contributor-proposed"
+            count_source = "public tagger count correction"
+
+    source_event_ids: list[str] = []
+    source_round_ids: list[str] = []
+    if not governed_rows.empty and "source_event_id" in governed_rows:
+        source_event_ids = sorted(set(
+            governed_rows["source_event_id"].dropna().astype(str)
+        ) - {"", "nan"})
+    if not governed_rows.empty and "category_round_id" in governed_rows:
+        source_round_ids = sorted(set(
+            governed_rows["category_round_id"].dropna().astype(str)
+        ) - {"", "nan"})
+    with st.expander("Boulder-count evidence", expanded=False):
+        st.write(f"**Status:** {count_status.replace('-', ' ')}")
+        st.write(f"**Source:** {count_source}")
+        if source_round_ids:
+            st.write("**Source round IDs:** " + ", ".join(source_round_ids))
+    round_uid = "round-" + _tag_uid(
+        source_scope, "|".join(source_event_ids), chosen_date, chosen_event,
+        round_name, gender, terrain_group,
+    )
 
     boulder_labels = []
     for number in range(1, expected_boulders + 1):
@@ -3721,18 +3842,18 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
     def compact_pair(label: str, key: str, help_text: str = "") -> tuple[int, int]:
         columns = st.columns([1.7, 2.2, 2.2])
         columns[0].markdown(f"**{label}**")
-        zone = columns[1].slider(
-            f"Zone {label}", 0, 3, 0, key=f"z_{count_key}_{boulder_number}_{key}",
+        pre_zone = columns[1].slider(
+            f"Before zone {label}", 0, 3, 0, key=f"z_{count_key}_{boulder_number}_{key}",
             label_visibility="collapsed", help=help_text or None,
         )
-        top = columns[2].slider(
-            f"Top {label}", 0, 3, 0, key=f"t_{count_key}_{boulder_number}_{key}",
+        post_zone = columns[2].slider(
+            f"After zone {label}", 0, 3, 0, key=f"t_{count_key}_{boulder_number}_{key}",
             label_visibility="collapsed", help=help_text or None,
         )
-        return top, zone
+        return pre_zone, post_zone
 
     with st.form(f"style_tag_fast_{count_key}_{boulder_number}", clear_on_submit=False):
-        st.markdown('<div class="zt-key"><span></span><span class="zt-zone">Z · Zone</span><span class="zt-top">T · Top</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="zt-key"><span></span><span class="zt-zone">Pre-zone · Start → Zone</span><span class="zt-top">Post-zone · Zone → Top</span></div>', unsafe_allow_html=True)
         core_scores = {
             "physical": compact_pair("Physical", "physical", STYLE_DEFINITIONS["physical"]),
             "technical": compact_pair("Technical", "technical", STYLE_DEFINITIONS["technical"]),
@@ -3741,12 +3862,12 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
         }
         direction = st.columns([1.7, 2.2, 2.2])
         direction[0].markdown("**Direction**")
-        zone_direction = direction[1].selectbox(
-            "Zone direction", ["Up", "Diagonal", "Sideways", "Mixed / unclear"],
+        pre_zone_direction = direction[1].selectbox(
+            "Before zone direction", ["Up", "Diagonal", "Sideways", "Mixed / unclear"],
             label_visibility="collapsed",
         )
-        top_direction = direction[2].selectbox(
-            "Top direction", ["Up", "Diagonal", "Sideways", "Mixed / unclear"],
+        post_zone_direction = direction[2].selectbox(
+            "After zone direction", ["Up", "Diagonal", "Sideways", "Mixed / unclear"],
             label_visibility="collapsed",
         )
         optional_scores: dict[str, tuple[int, int]] = {}
@@ -3779,23 +3900,33 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
             image_hash = hashlib.sha256(image_bytes).hexdigest() if image_bytes else ""
             suffix = Path(image_file.name).suffix.lower() if image_file is not None else ""
             stored_image = f"images/{image_hash}{suffix}" if image_hash else ""
+            boulder_uid = f"{round_uid}-b{boulder_number}"
             record: dict[str, object] = {
-                "schema_version": "3.0", "record_type": "style",
+                "schema_version": "4.0", "record_type": "style",
                 "submitted_at_utc": datetime.now(timezone.utc).isoformat(),
                 "competition": chosen_event, "competition_date": chosen_date,
-                "source_scope": source_scope, "round": round_name,
+                "source_scope": source_scope,
+                "source_event_ids": "|".join(source_event_ids),
+                "source_round_ids": "|".join(source_round_ids),
+                "round": round_name, "round_uid": round_uid,
                 "gender_terrain": gender, "terrain_group": terrain_group,
                 "boulder": f"B{boulder_number}", "expected_boulders": expected_boulders,
+                "boulder_count_status": count_status,
+                "boulder_count_source": count_source,
+                "boulder_uid": boulder_uid,
+                "pre_zone_segment_uid": f"{boulder_uid}-pre-zone",
+                "post_zone_segment_uid": f"{boulder_uid}-post-zone",
                 "image_name": image_file.name if image_file is not None else "",
                 "image_sha256": image_hash, "image_in_bundle": stored_image,
-                "top_direction": top_direction, "zone_direction": zone_direction,
+                "pre_zone_direction": pre_zone_direction,
+                "post_zone_direction": post_zone_direction,
                 "optional_tags_completed": add_optional_tags,
                 "notes": notes.strip(), "confidence": confidence,
                 "contributor": contributor.strip(),
             }
-            for score_key, (top_value, zone_value) in {**core_scores, **optional_scores}.items():
-                record[f"top_{score_key}_0_3"] = top_value
-                record[f"zone_{score_key}_0_3"] = zone_value
+            for score_key, (pre_zone_value, post_zone_value) in {**core_scores, **optional_scores}.items():
+                record[f"pre_zone_{score_key}_0_3"] = pre_zone_value
+                record[f"post_zone_{score_key}_0_3"] = post_zone_value
             st.session_state.style_tag_rows.append(record)
             if image_bytes and stored_image:
                 st.session_state.style_tag_images[stored_image] = image_bytes
@@ -3849,11 +3980,16 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
                 st.warning("Add a short explanation so the flag can be acted on.")
             else:
                 flag_record = {
-                    "schema_version": "3.0", "record_type": "flag",
+                    "schema_version": "4.0", "record_type": "flag",
                     "submitted_at_utc": datetime.now(timezone.utc).isoformat(),
                     "competition": chosen_event, "competition_date": chosen_date,
-                    "round": round_name, "gender_terrain": gender,
+                    "source_scope": source_scope,
+                    "source_event_ids": "|".join(source_event_ids),
+                    "source_round_ids": "|".join(source_round_ids),
+                    "round": round_name, "round_uid": round_uid,
+                    "gender_terrain": gender,
                     "terrain_group": terrain_group, "boulder": f"B{boulder_number}",
+                    "boulder_uid": f"{round_uid}-b{boulder_number}",
                     "flag_type": flag_type, "flag_note": flag_note.strip(),
                 }
                 st.session_state.style_tag_rows.append(flag_record)
@@ -3867,7 +4003,7 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
         with st.expander("Session backup", expanded=False):
             st.dataframe(session_records, hide_index=True, width="stretch", height=240)
             csv_bytes = session_records.to_csv(index=False).encode("utf-8")
-            st.download_button("Download session CSV", csv_bytes, "boulder_style_tags_v3.csv", "text/csv")
+            st.download_button("Download session CSV", csv_bytes, "boulder_style_tags_v4.csv", "text/csv")
     st.caption(
         "Shared database connected." if backend_url else
         "Shared database is not connected in this deployment; session CSV remains available as a backup."

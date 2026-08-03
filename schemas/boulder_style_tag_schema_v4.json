@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://comp-climbing-projections.streamlit.app/schemas/boulder_style_tag_schema_v4.json",
+  "title": "Comp Climbing Boulder Segment Style Tag v4",
+  "description": "Demand observation for one governed boulder, split into start-to-zone and zone-to-top segments.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "record_type",
+    "submitted_at_utc",
+    "competition",
+    "round",
+    "round_uid",
+    "gender_terrain",
+    "terrain_group",
+    "boulder",
+    "boulder_uid",
+    "pre_zone_segment_uid",
+    "post_zone_segment_uid",
+    "expected_boulders",
+    "boulder_count_status",
+    "pre_zone_direction",
+    "post_zone_direction",
+    "pre_zone_physical_0_3",
+    "post_zone_physical_0_3",
+    "pre_zone_technical_0_3",
+    "post_zone_technical_0_3",
+    "pre_zone_coordination_0_3",
+    "post_zone_coordination_0_3",
+    "confidence"
+  ],
+  "properties": {
+    "schema_version": {"const": "4.0"},
+    "record_type": {"const": "style"},
+    "submitted_at_utc": {"type": "string", "format": "date-time"},
+    "competition": {"type": "string", "minLength": 1},
+    "competition_date": {"type": "string"},
+    "source_scope": {"type": "string"},
+    "source_event_ids": {"type": "string"},
+    "source_round_ids": {"type": "string"},
+    "round": {"enum": ["Qualification", "Semi-final", "Final", "Other"]},
+    "round_uid": {"type": "string", "pattern": "^round-[a-f0-9]{20}$"},
+    "gender_terrain": {"enum": ["Men", "Women", "Mixed / unknown"]},
+    "terrain_group": {"type": "string", "minLength": 1},
+    "boulder": {"type": "string", "pattern": "^B[0-9]+$"},
+    "boulder_uid": {"type": "string", "pattern": "^round-[a-f0-9]{20}-b[0-9]+$"},
+    "pre_zone_segment_uid": {"type": "string", "pattern": "^round-[a-f0-9]{20}-b[0-9]+-pre-zone$"},
+    "post_zone_segment_uid": {"type": "string", "pattern": "^round-[a-f0-9]{20}-b[0-9]+-post-zone$"},
+    "expected_boulders": {"type": "integer", "minimum": 1, "maximum": 12},
+    "boulder_count_status": {
+      "enum": ["source-confirmed", "source-conflict", "format-assumption", "contributor-proposed", "unknown"]
+    },
+    "boulder_count_source": {"type": "string"},
+    "image_name": {"type": "string"},
+    "image_sha256": {"type": "string"},
+    "image_in_bundle": {"type": "string"},
+    "pre_zone_direction": {"enum": ["Up", "Diagonal", "Sideways", "Mixed / unclear"]},
+    "post_zone_direction": {"enum": ["Up", "Diagonal", "Sideways", "Mixed / unclear"]},
+    "optional_tags_completed": {"type": "boolean"},
+    "notes": {"type": "string"},
+    "confidence": {"enum": ["Low", "Moderate", "High"]},
+    "contributor": {"type": "string"}
+  },
+  "patternProperties": {
+    "^(pre_zone|post_zone)_[a-z0-9_]+_0_3$": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    }
+  },
+  "additionalProperties": false
+}

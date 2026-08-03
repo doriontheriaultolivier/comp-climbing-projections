@@ -122,3 +122,16 @@ hosting memory. The source warehouse and rebuild pipeline remain in the
 research repository. See [LICENSE.md](LICENSE.md) and
 [DATA_USE_TERMS.md](DATA_USE_TERMS.md). Viewing the product does not grant a
 licence to reuse its code, data, model or approach.
+
+## Boulder tagging and future style Elo
+
+The public tagger uses `data/boulder_round_inventory.csv` to show the actual
+source-reported number of boulders whenever available. Source-confirmed counts
+are locked; assumptions and conflicts remain visibly editable. Each saved
+boulder now has stable round, boulder, start-to-zone and zone-to-top IDs so
+style tags can later join athlete problem outcomes without merging Canadian
+Youth B/C terrain or separate Youth Worlds categories.
+
+The proposed style-rating method and its production release gate are documented
+in [docs/STYLE_ELO_MODEL.md](docs/STYLE_ELO_MODEL.md). No style Elo is promoted
+as a decision metric before sufficient tagging and frozen next-event validation.
