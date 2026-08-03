@@ -2669,7 +2669,20 @@ def main() -> None:
     elif workspace == "Physical Strength":
         render_physical_strength(athletes, selected, data)
     elif workspace == "Tag Boulder Styles":
-        render_style_tagging_v2(data["history"])
+        st.header("Boulder Style Tagging")
+        st.write(
+            "The public annotator now runs separately so images and community tagging "
+            "do not consume the analysis dashboard's memory."
+        )
+        st.link_button(
+            "Open the public Boulder Style Tagger",
+            "https://comp-climbing-boulder-tags.streamlit.app/",
+            type="primary",
+        )
+        st.caption(
+            "It includes searchable competitions, paired Zone/Top scoring, direction and "
+            "optional hold, foothold, physical, technical and movement tags."
+        )
     else:
         render_maths_behind(
             athletes, data["correlations"], data["calibration"], data
