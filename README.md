@@ -44,6 +44,7 @@ foothold, physical, technical and move-type tags are optional and default to
 zero. Visitors can export CSV, JSON or a complete ZIP containing images.
 
 `style_tagging_app.py` is the lightweight standalone public entry point. It can
+be used at <https://comp-climbing-boulder-tags.streamlit.app/>. It can
 write images to Google Drive and rows to Google Sheets through the Apps Script
 backend in `deployment/google_apps_script/style_tag_backend.gs`. Configure the
 Apps Script property `STYLE_TAG_FOLDER_ID`, deploy it as an anonymous web app,
