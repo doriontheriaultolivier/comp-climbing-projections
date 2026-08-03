@@ -2048,6 +2048,7 @@ def main() -> None:
           h1{font-size:2rem!important}
           [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
           [data-testid="column"]{min-width:100%!important}
+          [data-testid="stSegmentedControl"] [role="radiogroup"]{flex-wrap:wrap!important}
           .js-plotly-plot{min-height:420px}
         }
         </style>
