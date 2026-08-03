@@ -12,6 +12,7 @@ from comp_climbing_app import (
     physical_sufficiency_table,
     physical_transfer_figure,
     plain_key,
+    rating_radar_figure,
     read_data,
 )
 
@@ -26,7 +27,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(app.title[0].value, "Comp Climbing Projections")
         self.assertIn("Canadian Pool", [item.value for item in app.subheader])
-        self.assertEqual(len(app.get("plotly_chart")), 1)
+        self.assertGreaterEqual(len(app.get("plotly_chart")), 2)
 
     def test_progression_view(self) -> None:
         app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
@@ -36,7 +37,7 @@ class AppSmokeTests(unittest.TestCase):
             if item.label == "Overview section"
         ).set_value("Global progression").run(timeout=120)
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.get("plotly_chart")), 2)
+        self.assertGreaterEqual(len(app.get("plotly_chart")), 3)
 
     def test_pool_views_and_format_transform(self) -> None:
         app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
@@ -131,6 +132,30 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(result["count"], 6)
         self.assertEqual(result["status"], "source-confirmed")
         self.assertFalse(result["editable"])
+
+    def test_rating_radar_keeps_round_evidence_in_hover(self) -> None:
+        families = [
+            "Global-ELO", "Global-ELO-Qualies", "Global-ELO-Qualies-Flash",
+            "Global-ELO-Qualies-Onsight", "Global-ELO-Semies", "Global-ELO-Finals",
+        ]
+        rows = []
+        for athlete_index, athlete in enumerate(["Oscar Baudrand", "Colin Duffy"]):
+            for family_index, family in enumerate(families):
+                rows.append({
+                    "Athlete": athlete, "Rating family": family,
+                    "Elo": 1950 + athlete_index * 100 + family_index * 10,
+                    "Included rounds": 2 + family_index * 3,
+                    "Historical outcome estimate": "Make semifinal: 50% (fit 38%)",
+                })
+        figure = rating_radar_figure(
+            pd.DataFrame(rows), ["Oscar Baudrand", "Colin Duffy"],
+            "All-competition profile",
+        )
+        self.assertEqual(len(figure.data), 3)
+        self.assertIn("Included rounds", figure.data[1].hovertemplate)
+        self.assertNotEqual(figure.data[1].marker.size[0], figure.data[1].marker.size[1])
+        self.assertLessEqual(figure.layout.polar.radialaxis.range[0], 2000)
+        self.assertGreaterEqual(figure.layout.polar.radialaxis.range[1], 2000)
 
     def test_governed_boulder_count_exposes_conflict(self) -> None:
         rows = pd.DataFrame({

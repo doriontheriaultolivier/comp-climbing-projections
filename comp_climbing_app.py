@@ -1394,6 +1394,107 @@ def top_ribbon(
         return selected, discipline
 
 
+def rating_radar_figure(
+    detail: pd.DataFrame, athlete_order: list[str], view: str,
+) -> go.Figure:
+    """Show rating shape while keeping evidence volume visible in hover/markers."""
+    profiles = {
+        "All-competition profile": [
+            ("Global-ELO", "Overall"),
+            ("Global-ELO-Qualies", "Qualifying"),
+            ("Global-ELO-Qualies-Flash", "Flash qual."),
+            ("Global-ELO-Qualies-Onsight", "Onsight qual."),
+            ("Global-ELO-Semies", "Semifinal"),
+            ("Global-ELO-Finals", "Final"),
+        ],
+        "World-circuit profile": [
+            ("IFSC-ELO", "IFSC overall"),
+            ("IFSC-ELO-Qualies", "IFSC qual."),
+            ("IFSC-ELO-Semies", "IFSC semi"),
+            ("IFSC-ELO-Finals", "IFSC final"),
+            ("WR-ELO", "WR overall"),
+        ],
+    }
+    axes = profiles[view]
+    families = [family for family, _ in axes]
+    labels = [label for _, label in axes]
+    visible = detail.loc[detail["Rating family"].isin(families)].copy()
+    values = pd.to_numeric(visible["Elo"], errors="coerce").dropna()
+    low = float(min(values.min() if not values.empty else 1900, 2000))
+    high = float(max(values.max() if not values.empty else 2100, 2000))
+    pad = max(60.0, (high - low) * 0.12)
+    radial_min = 50 * np.floor((low - pad) / 50)
+    radial_max = 50 * np.ceil((high + pad) / 50)
+    figure = go.Figure()
+    closed_labels = [*labels, labels[0]]
+    figure.add_trace(go.Scatterpolar(
+        r=[2000] * len(closed_labels), theta=closed_labels,
+        mode="lines", name="2000 · 50% 2025 WC semifinal reference",
+        line={"color": "rgba(16,47,43,.42)", "width": 1.5, "dash": "dash"},
+        hovertemplate="2000 reference<extra></extra>",
+    ))
+    for athlete_index, athlete in enumerate(athlete_order):
+        athlete_rows = visible.loc[visible["Athlete"].eq(athlete)].set_index("Rating family")
+        if len(athlete_rows) < 3:
+            continue
+        ratings: list[float | None] = []
+        evidence: list[float] = []
+        outcomes: list[str] = []
+        for family in families:
+            if family not in athlete_rows.index:
+                ratings.append(None)
+                evidence.append(0.0)
+                outcomes.append("No rating evidence")
+                continue
+            item = athlete_rows.loc[family]
+            if isinstance(item, pd.DataFrame):
+                item = item.iloc[0]
+            rating = pd.to_numeric(pd.Series([item["Elo"]]), errors="coerce").iloc[0]
+            rounds = pd.to_numeric(pd.Series([item["Included rounds"]]), errors="coerce").iloc[0]
+            ratings.append(float(rating) if np.isfinite(rating) else None)
+            evidence.append(float(rounds) if np.isfinite(rounds) else 0.0)
+            outcomes.append(str(item["Historical outcome estimate"]))
+        sizes = [min(17.0, 7.0 + 2.4 * np.log1p(max(value, 0.0))) for value in evidence]
+        custom = [
+            [families[index], evidence[index], outcomes[index]]
+            for index in range(len(families))
+        ]
+        figure.add_trace(go.Scatterpolar(
+            r=[*ratings, ratings[0]], theta=closed_labels,
+            mode="lines+markers", name=athlete,
+            line={"color": ATHLETE_COLORS[athlete_index % len(ATHLETE_COLORS)], "width": 3},
+            marker={
+                "color": ATHLETE_COLORS[athlete_index % len(ATHLETE_COLORS)],
+                "size": [*sizes, sizes[0]], "line": {"color": "white", "width": 1},
+            },
+            fill="toself", fillcolor=transparent(
+                ATHLETE_COLORS[athlete_index % len(ATHLETE_COLORS)], 0.08
+            ),
+            customdata=[*custom, custom[0]],
+            hovertemplate=(
+                "<b>%{fullData.name}</b><br>%{theta}<br>Elo: %{r:.0f}"
+                "<br>Included rounds: %{customdata[1]:.0f}"
+                "<br>%{customdata[2]}<extra></extra>"
+            ),
+            connectgaps=False,
+        ))
+    figure.update_layout(
+        height=575,
+        margin={"l": 55, "r": 55, "t": 45, "b": 95},
+        polar={
+            "radialaxis": {
+                "range": [radial_min, radial_max], "tickformat": ",.0f",
+                "gridcolor": "rgba(113,129,126,.22)", "angle": 90,
+            },
+            "angularaxis": {"gridcolor": "rgba(113,129,126,.18)"},
+            "bgcolor": "rgba(244,248,247,.65)",
+        },
+        legend={"orientation": "h", "y": -0.16, "x": 0.5, "xanchor": "center"},
+        paper_bgcolor="white",
+    )
+    return figure
+
+
 def render_rating_detail(
     athletes: pd.DataFrame,
     history: pd.DataFrame,
@@ -1445,6 +1546,30 @@ def render_rating_detail(
         if plain_key(name) in set(focus["name_key"])
     )
     st.markdown(legend, unsafe_allow_html=True)
+    athlete_order = [
+        friendly_name(name) for name in selected
+        if plain_key(name) in set(focus["name_key"])
+    ]
+    if 2 <= len(athlete_order) <= 5:
+        radar_view = st.segmented_control(
+            "Rating radar", ["All-competition profile", "World-circuit profile"],
+            default="All-competition profile",
+            help=(
+                "The radar compares rating shape, not certainty. Marker size represents the "
+                "number of included rounds; exact evidence remains in the table."
+            ),
+        ) or "All-competition profile"
+        st.plotly_chart(
+            rating_radar_figure(detail, athlete_order, radar_view),
+            width="stretch", config={"displayModeBar": False},
+        )
+        st.caption(
+            "Further from the centre = higher Elo. The dashed 2000 ring is the normalized "
+            "50% semifinal reference. Larger markers mean more included rounds; a large shape "
+            "with tiny markers is a lead to investigate, not a settled conclusion."
+        )
+    elif len(athlete_order) > 5:
+        st.caption("Radar hidden for more than five athletes to preserve readability; uncheck athletes to compare profiles.")
     st.dataframe(
         detail,
         hide_index=True,
