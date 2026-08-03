@@ -6,6 +6,7 @@
   "type": "object",
   "required": [
     "schema_version",
+    "tag_taxonomy_version",
     "record_type",
     "submitted_at_utc",
     "competition",
@@ -31,6 +32,7 @@
   ],
   "properties": {
     "schema_version": {"const": "4.0"},
+    "tag_taxonomy_version": {"const": "2026-08-03.1"},
     "record_type": {"const": "style"},
     "submitted_at_utc": {"type": "string", "format": "date-time"},
     "competition": {"type": "string", "minLength": 1},

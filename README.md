@@ -135,3 +135,5 @@ Youth B/C terrain or separate Youth Worlds categories.
 The proposed style-rating method and its production release gate are documented
 in [docs/STYLE_ELO_MODEL.md](docs/STYLE_ELO_MODEL.md). No style Elo is promoted
 as a decision metric before sufficient tagging and frozen next-event validation.
+The active optional-tag vocabulary and candidates awaiting coach review are in
+[docs/STYLE_TAG_TAXONOMY.md](docs/STYLE_TAG_TAXONOMY.md).

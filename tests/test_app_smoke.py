@@ -119,6 +119,15 @@ class AppSmokeTests(unittest.TestCase):
         slider_labels = {item.label for item in app.slider}
         self.assertIn("After zone Slopers", slider_labels)
         self.assertIn("Before zone Dyno", slider_labels)
+        self.assertIn("Before zone Crimps / edges · 12–30 mm", slider_labels)
+        self.assertIn("After zone Small crimps / edges · <12 mm", slider_labels)
+        self.assertIn("Before zone No-texture footholds", slider_labels)
+        self.assertIn("Before zone Fight a barn door", slider_labels)
+        self.assertIn("After zone Overhead press", slider_labels)
+        self.assertIn("Before zone Small sideways opposition", slider_labels)
+        self.assertIn("After zone Smeary heel hook", slider_labels)
+        self.assertNotIn("Before zone Crimps", slider_labels)
+        self.assertNotIn("Before zone Toe hook", slider_labels)
 
     def test_governed_boulder_count_prefers_exact_source_metadata(self) -> None:
         rows = pd.DataFrame({

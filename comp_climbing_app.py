@@ -79,6 +79,8 @@ STYLE_DEFINITIONS = {
     ),
 }
 
+STYLE_TAG_TAXONOMY_VERSION = "2026-08-03.1"
+
 STYLE_TAG_GROUPS = {
     "Physical qualities": [
         ("explosiveness", "Explosiveness"),
@@ -94,26 +96,47 @@ STYLE_TAG_GROUPS = {
     "Handholds": [
         ("hand_slopers", "Slopers"),
         ("hand_jugs", "Jugs"),
-        ("hand_crimps", "Crimps"),
+        ("hand_crimps_12_30mm", "Crimps / edges · 12–30 mm"),
+        ("hand_crimps_under_12mm", "Small crimps / edges · <12 mm"),
         ("hand_pinches", "Pinches"),
     ],
     "Footholds": [
         ("foot_small_incut", "Small incut feet"),
         ("foot_small_smeary", "Small smeary feet"),
+        ("foot_no_texture", "No-texture footholds"),
         ("foot_volumes", "Volumes"),
         ("foot_juggy", "Juggy footholds"),
     ],
-    "Move types": [
-        ("move_blocked", "Blocked / constrained"),
+    "Move types · Dynamic": [
         ("move_dyno", "Dyno"),
         ("move_run_jump", "Run-and-jump"),
         ("move_paddle", "Paddle"),
         ("move_deadpoint", "Deadpoint"),
-        ("move_compression", "Compression"),
+        ("move_one_arm_catch", "One-arm catch"),
+    ],
+    "Move types · Press, pull & opposition": [
+        ("move_no_hand", "No-hand balance / movement"),
+        ("move_fight_barndoor", "Fight a barn door"),
         ("move_press", "Press"),
+        ("move_overhead_press", "Overhead press"),
         ("move_mantle", "Mantle"),
-        ("move_toe_hook", "Toe hook"),
-        ("move_heel_hook", "Heel hook"),
+        ("move_gaston", "Gaston"),
+        ("move_small_sideways_compression", "Small sideways compression"),
+        ("move_large_sideways_compression", "Large sideways compression"),
+        ("move_small_sideways_opposition", "Small sideways opposition"),
+        ("move_large_sideways_opposition", "Large sideways opposition"),
+        ("move_undercling_press", "Undercling press"),
+        ("move_bicep_undercling", "Bicep undercling"),
+    ],
+    "Move types · Reading & constraints": [
+        ("move_blocked_holds", "Blocked holds"),
+        ("move_hidden_holds", "Hidden holds"),
+    ],
+    "Move types · Hooks & feet": [
+        ("move_far_toe_hook", "Far toe hook"),
+        ("move_close_toe_hook", "Close toe hook"),
+        ("move_incut_heel_hook", "Incut heel hook"),
+        ("move_smeary_heel_hook", "Smeary heel hook"),
         ("move_drop_knee", "Drop-knee"),
         ("move_smear", "Smear"),
     ],
@@ -3401,7 +3424,7 @@ def _render_style_tagging_v2_legacy(history: pd.DataFrame, standalone: bool = Fa
             st.markdown("#### Optional tags")
             st.caption("Leave any tag at 0 when it is absent or you are unsure.")
             for theme, items in STYLE_TAG_GROUPS.items():
-                with st.expander(theme, expanded=theme in {"Physical qualities", "Handholds"}):
+                with st.expander(theme, expanded=theme in {"Physical qualities", "Move types · Dynamic"}):
                     columns = st.columns(min(4, len(items)))
                     for index, (tag_key, tag_label) in enumerate(items):
                         optional_scores[tag_key] = paired_sliders(
@@ -4000,7 +4023,7 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
             st.markdown("#### Optional tags")
             st.caption("Leave 0 when absent or uncertain.")
             for theme, items in STYLE_TAG_GROUPS.items():
-                with st.expander(theme, expanded=theme in {"Physical qualities", "Move types"}):
+                with st.expander(theme, expanded=theme in {"Physical qualities", "Move types · Dynamic"}):
                     for tag_key, tag_label in items:
                         optional_scores[tag_key] = compact_pair(tag_label, tag_key)
         details = st.columns(2)
@@ -4028,6 +4051,7 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
             boulder_uid = f"{round_uid}-b{boulder_number}"
             record: dict[str, object] = {
                 "schema_version": "4.0", "record_type": "style",
+                "tag_taxonomy_version": STYLE_TAG_TAXONOMY_VERSION,
                 "submitted_at_utc": datetime.now(timezone.utc).isoformat(),
                 "competition": chosen_event, "competition_date": chosen_date,
                 "source_scope": source_scope,
