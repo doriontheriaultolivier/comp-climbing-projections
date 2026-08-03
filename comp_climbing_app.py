@@ -14,9 +14,11 @@ import io
 import json
 import math
 from pathlib import Path
+import re
 import unicodedata
 from urllib import error as urlerror
 from urllib import request as urlrequest
+from urllib.parse import urlencode
 import zipfile
 
 import numpy as np
@@ -2035,6 +2037,211 @@ def grade_evidence_summary(
     return pd.DataFrame(rows)
 
 
+def _selected_priority_table(
+    athletes: pd.DataFrame,
+    selected: list[str],
+    profiles: pd.DataFrame,
+    latest: pd.DataFrame,
+) -> pd.DataFrame:
+    """Turn grade, Elo and test evidence into cautious athlete-level hypotheses.
+
+    The percentages are an *analysis allocation*: where the coach should look
+    next. They are deliberately not presented as weekly training volume.
+    """
+    if not selected:
+        return pd.DataFrame()
+    current = athletes.copy()
+    current["name_key"] = current["athlete_name"].map(plain_key)
+    current = current.sort_values(
+        "Global-ELO evidence" if "Global-ELO evidence" in current else "Global-ELO",
+        ascending=False,
+    ).drop_duplicates("name_key")
+    profile = profiles.copy()
+    if not profile.empty:
+        profile["name_key"] = profile["athlete_name"].map(plain_key)
+        rating_columns = [
+            column for column in [
+                "pool", "name_key", "gender", "Global-ELO", "Global-ELO evidence",
+            ] if column in current
+        ]
+        profile = profile.merge(
+            current[rating_columns].drop_duplicates("name_key"),
+            on=[column for column in ["pool", "name_key"] if column in rating_columns],
+            how="left",
+        )
+        profile["analysis_gender"] = _physical_gender(profile)
+
+    grade_columns = {
+        "50% flash": "boulder_grade_50pct_flash_v",
+        "max <=3 sends": "boulder_grade_3x_physical_sends_last_3_months_v",
+    }
+    grade_models: dict[tuple[str, str], dict[str, object]] = {}
+    if not profile.empty:
+        for label, column in grade_columns.items():
+            plot = profile.dropna(subset=[column, "Global-ELO"]).copy()
+            plot[column] = pd.to_numeric(plot[column], errors="coerce")
+            plot["Global-ELO"] = pd.to_numeric(plot["Global-ELO"], errors="coerce")
+            comparison = _saturation_cv_comparison(plot, column, "Global-ELO")
+            if comparison["choice"] == "Gender-specific":
+                for gender, group in plot.groupby("analysis_gender"):
+                    model = _fit_bayesian_saturation(
+                        group[column].to_numpy(), group["Global-ELO"].to_numpy()
+                    )
+                    if model is not None:
+                        grade_models[(label, gender)] = model
+            pooled = _fit_bayesian_saturation(
+                plot[column].to_numpy(), plot["Global-ELO"].to_numpy()
+            )
+            if pooled is not None:
+                grade_models[(label, "Pooled")] = pooled
+
+    rows: list[dict[str, object]] = []
+    for selected_name in selected:
+        key = plain_key(selected_name)
+        rating_row = current.loc[current["name_key"].eq(key)]
+        rating_row = rating_row.iloc[0] if not rating_row.empty else pd.Series(dtype=object)
+        global_elo = pd.to_numeric(rating_row.get("Global-ELO"), errors="coerce")
+        evidence_rounds = pd.to_numeric(
+            rating_row.get("Global-ELO evidence"), errors="coerce"
+        )
+        person = profile.loc[profile["name_key"].eq(key)].tail(1) if not profile.empty else pd.DataFrame()
+        gender = (
+            str(person.iloc[0].get("analysis_gender", "Unspecified"))
+            if not person.empty else str(rating_row.get("gender", "Unspecified"))
+        )
+        grade_values: dict[str, float] = {}
+        grade_predictions: list[float] = []
+        positive_probabilities: list[float] = []
+        if not person.empty:
+            for label, column in grade_columns.items():
+                value = pd.to_numeric(person.iloc[0].get(column), errors="coerce")
+                if not np.isfinite(value):
+                    continue
+                grade_values[label] = float(value)
+                model = grade_models.get((label, gender)) or grade_models.get((label, "Pooled"))
+                if model is None:
+                    continue
+                draws = _draw_bayesian_saturation(
+                    model, np.array([value]), draw_count=800,
+                    seed=20260803 + len(key) + len(label),
+                )
+                grade_predictions.append(float(np.median(draws["predictions"][:, 0])))
+                positive_probabilities.append(float(np.mean(draws["slope"] > 0)))
+
+        sufficiency = physical_sufficiency_table(latest, selected_name) if not latest.empty else pd.DataFrame()
+        candidates = (
+            sufficiency.loc[sufficiency["Current reading"].str.startswith("Capacity candidate")]
+            if not sufficiency.empty else pd.DataFrame()
+        )
+        supported = (
+            sufficiency.loc[sufficiency["Current reading"].str.contains(
+                "Likely sufficient|High peer capacity", regex=True
+            )] if not sufficiency.empty else pd.DataFrame()
+        )
+        if not candidates.empty:
+            ordered_candidates = candidates.sort_values(
+                ["P(at/above sufficiency)", "Peer percentile"]
+            )
+            main = ordered_candidates.iloc[0]
+            secondary = ordered_candidates.iloc[1] if len(ordered_candidates) > 1 else None
+            main_potential = f"Verify {main['Test']} ({main['Quality']})"
+            secondary_potential = (
+                f"Verify {secondary['Test']} ({secondary['Quality']})"
+                if secondary is not None else "No second physical deficit supported"
+            )
+            physical_weight = 46.0
+            physical_certainty = float(np.nanmean([
+                main.get("P(positive relation)", np.nan),
+                main.get("P(at/above sufficiency)", np.nan),
+            ]))
+        else:
+            strongest = (
+                supported.sort_values("Peer percentile", ascending=False).iloc[0]
+                if not supported.empty else None
+            )
+            main_potential = (
+                f"Maintain {strongest['Test']}; no deficit signal"
+                if strongest is not None else "No supported physical limiter yet"
+            )
+            secondary_potential = "Collect/refresh tests, then verify on matching boulders"
+            physical_weight = 24.0 if strongest is not None else 32.0
+            physical_certainty = (
+                float(strongest.get("P(at/above sufficiency)", np.nan))
+                if strongest is not None else np.nan
+            )
+
+        grade_prediction = float(np.mean(grade_predictions)) if grade_predictions else np.nan
+        transfer_gap = (
+            float(global_elo - grade_prediction)
+            if np.isfinite(global_elo) and np.isfinite(grade_prediction) else np.nan
+        )
+        flash_gap = (
+            grade_values.get("max <=3 sends", np.nan) - grade_values.get("50% flash", np.nan)
+        )
+        # A large project-to-flash gap points to conversion work, but cannot tell
+        # technical and coordinative causes apart until boulders are tagged.
+        technical_weight = 38.0
+        coordination_weight = 38.0
+        if np.isfinite(flash_gap):
+            conversion_signal = float(np.clip((flash_gap - 1.0) * 6.0, -5.0, 12.0))
+            technical_weight += 0.55 * conversion_signal
+            coordination_weight += 0.45 * conversion_signal
+        if np.isfinite(transfer_gap) and transfer_gap < -40:
+            technical_weight += 5.0
+            coordination_weight += 5.0
+        total = physical_weight + technical_weight + coordination_weight
+        physical_pct = int(round(100 * physical_weight / total))
+        technical_pct = int(round(100 * technical_weight / total))
+        coordination_pct = 100 - physical_pct - technical_pct
+
+        grade_confidence = (
+            float(np.mean(positive_probabilities)) if positive_probabilities else np.nan
+        )
+        evidence_factor = min(1.0, float(evidence_rounds) / 12.0) if np.isfinite(evidence_rounds) else 0.0
+        data_factor = min(1.0, (len(grade_values) + min(len(sufficiency), 3)) / 5.0)
+        certainty_score = np.nanmean([
+            grade_confidence if np.isfinite(grade_confidence) else 0.25,
+            evidence_factor, data_factor,
+        ])
+        certainty = "high" if certainty_score >= 0.72 else "moderate" if certainty_score >= 0.48 else "low"
+        grade_text = (
+            ", ".join(f"{name} V{value:.1f}" for name, value in grade_values.items())
+            if grade_values else "no linked grade report"
+        )
+        if np.isfinite(transfer_gap):
+            if transfer_gap < -40:
+                transfer_text = (
+                    f"Grades imply about {abs(transfer_gap):.0f} more Elo than current results; "
+                    "prioritize competition conversion and matching-style evidence."
+                )
+            elif transfer_gap > 40:
+                transfer_text = (
+                    f"Competition Elo is about {transfer_gap:.0f} above the grade-only estimate; "
+                    "do not reduce the athlete to gym grades."
+                )
+            else:
+                transfer_text = "Grade-only and competition estimates are broadly aligned."
+        else:
+            transfer_text = "Grade-to-Elo transfer cannot yet be estimated."
+        rows.append({
+            "Athlete": friendly_name(selected_name),
+            "Main physical potential": f"{main_potential} ({certainty})",
+            "Secondary physical potential": f"{secondary_potential} ({certainty})",
+            "Physical focus": f"{physical_pct}%",
+            "Technical focus": f"{technical_pct}%",
+            "Coordination focus": f"{coordination_pct}%",
+            "Key underperformance tags": "Pending matched tagged boulders + athlete outcomes (low)",
+            "Explanation": (
+                f"Global-ELO {global_elo:.0f} from {evidence_rounds:.0f} rounds; {grade_text}. "
+                f"{transfer_text} Percentages allocate the next analysis, not training volume. "
+                f"The physical candidate still needs terrain-demand and observed-failure checks ({certainty})."
+                if np.isfinite(global_elo) else
+                f"No linked Global-ELO; {grade_text}. Collect competition and matched-boulder evidence before prescribing ({certainty})."
+            ),
+        })
+    return pd.DataFrame(rows)
+
+
 def render_physical_strength(
     athletes: pd.DataFrame, selected: list[str], data: dict[str, pd.DataFrame]
 ) -> None:
@@ -2066,6 +2273,32 @@ def render_physical_strength(
             )
             latest = latest.merge(
                 evidence_lookup, on=["pool", "name_key"], how="left"
+            )
+
+    profiles = data.get("physical_profiles", pd.DataFrame())
+    priority_table = _selected_priority_table(athletes, selected, profiles, latest)
+    if not priority_table.empty:
+        st.markdown("#### Selected athletes - working priorities")
+        st.caption(
+            "Kilter-equivalent grades use the reported conversion already supplied in the "
+            "testing database (Tension +1 grade; Moon +1.5). Percentages show where to "
+            "investigate next, not a weekly training-volume prescription."
+        )
+        st.dataframe(
+            priority_table, hide_index=True, width="stretch",
+            height=min(470, 76 + 46 * len(priority_table)),
+            column_config={
+                "Explanation": st.column_config.TextColumn(width="large"),
+                "Key underperformance tags": st.column_config.TextColumn(width="medium"),
+            },
+        )
+        with st.expander("How to read this table"):
+            st.write(
+                "A physical test can identify a capacity worth checking; it cannot, by itself, "
+                "prove the athlete failed because of that capacity. Style and movement tags "
+                "will replace the pending column only after the same boulder is linked to the "
+                "athlete's result or attempts. Certainty reflects grade coverage, rating rounds "
+                "and same-sex test evidence."
             )
 
     if view == "Population priorities":
@@ -2546,6 +2779,25 @@ def render_maths_behind(
         "attempt-level failure evidence and enough repeated boulders. Until then the app says "
         "capacity candidate, likely sufficient, or unresolved—never 'train this' from one residual."
     )
+    st.markdown("#### Physical-ELO: the governed next step")
+    st.write(
+        "Physical-ELO will be a separate style-specific rating, not a relabelled Global-ELO. "
+        "A round will affect it in proportion to the tagged physical demand of its boulders, "
+        "while athlete updates remain zero-sum inside the same field. Technical and "
+        "coordination ratings will use the same structure. This preserves the common World-"
+        "readiness scale while asking a narrower question: who performs better when this "
+        "demand is high?"
+    )
+    st.latex(
+        r"\Delta R^{phys}_{i,e}=q_e\,d^{phys}_e\,K_{i,e}(S_{i,e}-E_{i,e}),"
+        r"\qquad d^{phys}_e=\frac{1}{B_e}\sum_{b=1}^{B_e}\frac{P_{b,Z}+P_{b,T}}{6}"
+    )
+    st.caption(
+        "q is event-quality weight; d is tagged physical demand across B boulders; S-E is "
+        "the usual observed-minus-expected result. Promotion requires enough independent "
+        "taggers, inter-rater agreement, and a frozen next-event backtest beating Global-ELO "
+        "on high-physical rounds. Until then, style focus remains a hypothesis."
+    )
     st.markdown("#### How this fits the climbing literature")
     st.markdown(
         "- A randomized trial improved dynamic and isometric finger strength without a "
@@ -2870,7 +3122,22 @@ def save_style_tag_remotely(
         return False, f"Remote save failed: {exc}"
 
 
-def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> None:
+@st.cache_data(show_spinner=False, ttl=60, max_entries=2)
+def fetch_style_tags_remotely(url: str, limit: int = 1500) -> list[dict[str, object]]:
+    """Read shared tags when the optional Apps Script endpoint supports listing."""
+    if not url:
+        return []
+    separator = "&" if "?" in url else "?"
+    request_url = f"{url}{separator}{urlencode({'action': 'list', 'limit': limit})}"
+    try:
+        with urlrequest.urlopen(request_url, timeout=18) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        return list(result.get("records", [])) if result.get("ok") else []
+    except (urlerror.URLError, TimeoutError, json.JSONDecodeError, TypeError):
+        return []
+
+
+def _render_style_tagging_v2_legacy(history: pd.DataFrame, standalone: bool = False) -> None:
     """Collect structured Zone/Top demand ratings for a boulder."""
     st.header("Boulder Style Tagging")
     st.write(
@@ -3118,6 +3385,495 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
             "This separate annotator keeps public tagging and image traffic away from the "
             "performance dashboard."
         )
+
+
+def _tag_round(value: object) -> str:
+    text = plain_key(value)
+    if "qual" in text or "clasific" in text:
+        return "Qualification"
+    if "semi" in text:
+        return "Semi-final"
+    if "final" in text:
+        return "Final"
+    return ""
+
+
+def _tag_boulder_number(value: object) -> int | None:
+    text = str(value or "")
+    match = re.search(r"\bB\s*(\d+)", text, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    fallback = re.search(r"\d+", text)
+    return int(fallback.group(0)) if fallback else None
+
+
+def _tag_records_frame(records: list[dict[str, object]]) -> pd.DataFrame:
+    frame = pd.DataFrame(records)
+    if frame.empty:
+        return pd.DataFrame(columns=[
+            "competition", "competition_date", "round", "gender_terrain",
+            "terrain_group", "boulder", "record_type", "optional_tags_completed",
+            "expected_boulders",
+        ])
+    defaults = {
+        "terrain_group": "Open / Senior", "record_type": "style",
+        "optional_tags_completed": False, "expected_boulders": np.nan,
+    }
+    for column, value in defaults.items():
+        if column not in frame:
+            frame[column] = value
+        else:
+            frame[column] = frame[column].fillna(value)
+    return frame
+
+
+def _tag_context_mask(
+    frame: pd.DataFrame, event: str, round_name: str, gender: str, terrain_group: str,
+) -> pd.Series:
+    if frame.empty:
+        return pd.Series(False, index=frame.index)
+    return (
+        frame["competition"].astype(str).eq(str(event))
+        & frame["round"].astype(str).eq(str(round_name))
+        & frame["gender_terrain"].astype(str).eq(str(gender))
+        & frame["terrain_group"].astype(str).eq(str(terrain_group))
+        & ~frame["record_type"].astype(str).eq("flag")
+    )
+
+
+def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> None:
+    """Fast public workflow for event/round/boulder demand annotation."""
+    st.header("Boulder Style Tagging")
+    st.caption(
+        "Choose the terrain once, score Zone and Top quickly, then move directly to the next boulder."
+    )
+    st.markdown(
+        """
+        <style>
+        .zt-key{display:flex;gap:1.2rem;align-items:center;margin:.2rem 0 .7rem}
+        .zt-zone{color:#287DB2;font-weight:800}.zt-top{color:#D87921;font-weight:800}
+        div[data-baseweb="select"]>div{min-height:3rem}
+        [role="listbox"]{min-width:min(980px,94vw)!important}
+        </style>
+        """, unsafe_allow_html=True,
+    )
+    with st.expander("0-3 scoring guide", expanded=False):
+        st.markdown(
+            "**0 absent · 1 present · 2 important · 3 dominant.** Score the demand, "
+            "not whether a particular athlete succeeded. Physical, technical and "
+            "coordination are independent dimensions."
+        )
+        st.write(f"Physical: {STYLE_DEFINITIONS['physical']}")
+        st.write(f"Technical: {STYLE_DEFINITIONS['technical']}")
+        st.write(f"Coordination: {STYLE_DEFINITIONS['coordination']}")
+
+    if "style_tag_rows" not in st.session_state:
+        st.session_state.style_tag_rows = []
+    if "style_tag_images" not in st.session_state:
+        st.session_state.style_tag_images = {}
+    pending_navigation = st.session_state.pop("tag_pending_navigation", None)
+    if isinstance(pending_navigation, dict):
+        for state_key, state_value in pending_navigation.items():
+            if state_value is None:
+                st.session_state.pop(state_key, None)
+            else:
+                st.session_state[state_key] = state_value
+    backend_url = style_tag_backend_url()
+    remote_rows = fetch_style_tags_remotely(backend_url) if backend_url else []
+    all_rows = [*remote_rows, *st.session_state.style_tag_rows]
+    records = _tag_records_frame(all_rows)
+
+    if not records.empty and records["competition"].astype(str).ne("").any():
+        coverage_rows = []
+        valid = records.loc[
+            records["competition"].astype(str).ne("")
+            & ~records["record_type"].astype(str).eq("flag")
+        ].copy()
+        for keys, group in valid.groupby(
+            ["competition", "competition_date", "round", "gender_terrain", "terrain_group"],
+            dropna=False,
+        ):
+            boulders = group["boulder"].map(_tag_boulder_number).dropna().astype(int)
+            expected = pd.to_numeric(group["expected_boulders"], errors="coerce").dropna()
+            expected_count = int(expected.max()) if not expected.empty else (
+                int(boulders.max()) if not boulders.empty else 0
+            )
+            style_done = boulders.nunique()
+            tag_done = group.loc[
+                group["optional_tags_completed"].astype(str).str.lower().isin(["true", "1"]),
+                "boulder",
+            ].map(_tag_boulder_number).dropna().nunique()
+            coverage_rows.append({
+                "Competition": keys[0], "Date": keys[1], "Round": keys[2],
+                "Gender": keys[3], "Terrain": keys[4],
+                "Style": f"{style_done}/{expected_count or '?'}",
+                "Tags": f"{tag_done}/{expected_count or '?'}",
+                "Responses": len(group),
+            })
+        if coverage_rows:
+            with st.expander("Completed and in-progress rounds", expanded=True):
+                st.dataframe(
+                    pd.DataFrame(coverage_rows).sort_values(
+                        ["Date", "Competition"], ascending=[False, True]
+                    ),
+                    hide_index=True, width="stretch", height=250,
+                )
+
+    event_catalog = pd.DataFrame()
+    if not history.empty and "event_name" in history:
+        event_catalog = history.copy()
+        event_catalog["event_name"] = event_catalog["event_name"].fillna("").astype(str).str.strip()
+        event_catalog["event_date"] = pd.to_datetime(event_catalog.get("event_date"), errors="coerce")
+        if "confirmed_procedure" in event_catalog:
+            event_catalog = event_catalog.loc[
+                ~event_catalog["confirmed_procedure"].astype(str).str.casefold().eq("scramble")
+            ]
+        event_catalog["round_clean"] = event_catalog.get(
+            "round_group", pd.Series("", index=event_catalog.index)
+        ).map(_tag_round)
+        event_catalog = event_catalog.loc[event_catalog["event_name"].ne("")]
+        event_catalog["date_label"] = event_catalog["event_date"].dt.strftime("%Y-%m-%d").fillna("Date unknown")
+        event_catalog["label"] = event_catalog["date_label"] + " - " + event_catalog["event_name"]
+
+    search = st.text_input(
+        "Competition search", placeholder="Start typing a date or name: 2026-06, Prague, Nationals...",
+        help="Suggestions come from the results.info event database; partial dates work.",
+    ).strip()
+    suggestions = event_catalog
+    if search and not suggestions.empty:
+        query = unicodedata.normalize("NFKD", search).encode("ascii", "ignore").decode().casefold()
+        normalized = suggestions["label"].map(
+            lambda value: unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode().casefold()
+        )
+        suggestions = suggestions.loc[normalized.str.contains(query, regex=False)]
+    option_rows = suggestions.sort_values("event_date", ascending=False).drop_duplicates("label").head(180)
+    event_options = option_rows["label"].tolist()
+    if not event_options:
+        event_options = ["Custom competition"]
+    elif "Custom competition" not in event_options:
+        event_options.append("Custom competition")
+    event_choice = st.selectbox(
+        "Competition", event_options, key="tag_event_choice",
+        help="The full competition name stays visible in the open list.",
+    )
+    custom_event = ""
+    if event_choice == "Custom competition":
+        custom_event = st.text_input("Competition name", key="tag_custom_event").strip()
+    chosen_event = custom_event or (
+        event_choice.split(" - ", 1)[1] if " - " in event_choice else event_choice
+    )
+    chosen_date = event_choice.split(" - ", 1)[0] if " - " in event_choice else ""
+    event_rows = event_catalog.loc[event_catalog["label"].eq(event_choice)] if not event_catalog.empty else pd.DataFrame()
+    source_scope = (
+        str(event_rows["source_scope"].mode().iloc[0])
+        if not event_rows.empty and "source_scope" in event_rows and not event_rows["source_scope"].dropna().empty
+        else ""
+    )
+
+    available_rounds = [
+        value for value in ["Qualification", "Semi-final", "Final"]
+        if event_rows.empty or value in set(event_rows["round_clean"].dropna())
+    ] or ["Qualification", "Semi-final", "Final"]
+    round_name = st.segmented_control(
+        "Round", available_rounds,
+        default=available_rounds[0] if "tag_round_choice" not in st.session_state else None,
+        key="tag_round_choice",
+    )
+    if round_name is None:
+        round_name = available_rounds[0]
+
+    youth_event = any(token in plain_key(chosen_event) for token in ["youth", "junior", "jeunesse"])
+    if source_scope == "CEC":
+        terrain_options = [
+            "Youth A + Junior (shared Canadian terrain)", "Youth B", "Youth C", "Other",
+        ] if youth_event else [
+            "Open / Senior", "Youth A + Junior (shared Canadian terrain)",
+            "Youth B", "Youth C", "Other",
+        ]
+    else:
+        terrain_options = [
+            "Youth A", "Junior", "Youth B", "Youth C", "Other",
+        ] if youth_event else [
+            "Open / Senior", "Youth A", "Junior", "Youth B", "Youth C", "Other",
+        ]
+    terrain_group = st.selectbox(
+        "Age-class terrain", terrain_options, key="tag_terrain_group",
+        help=(
+            "Canadian Youth A and Junior may share a terrain. Youth Worlds keeps every age "
+            "category separate. Youth B and C are always separate from each other and A/Junior."
+        ),
+    )
+    st.caption(
+        "Terrain identity rule: Canadian A/Junior can share; B and C never merge. "
+        "At Youth Worlds, A and Junior also remain separate."
+    )
+
+    round_rows = event_rows.loc[event_rows["round_clean"].eq(round_name)] if not event_rows.empty else pd.DataFrame()
+    available_genders = []
+    if not round_rows.empty and "pool" in round_rows:
+        pools = set(round_rows["pool"].dropna().astype(str))
+        if "Boulder_Men" in pools:
+            available_genders.append("Men")
+        if "Boulder_Women" in pools:
+            available_genders.append("Women")
+    available_genders = available_genders or ["Men", "Women"]
+    gender = st.segmented_control(
+        "Gender terrain", available_genders,
+        default=available_genders[0] if "tag_gender_choice" not in st.session_state else None,
+        key="tag_gender_choice",
+    )
+    if gender is None:
+        gender = available_genders[0]
+
+    def context_counts(target_round: str, target_gender: str) -> str:
+        subset = records.loc[
+            _tag_context_mask(
+                records, chosen_event, target_round, target_gender, terrain_group
+            )
+        ]
+        styled = subset["boulder"].map(_tag_boulder_number).dropna().nunique()
+        tagged = subset.loc[
+            subset["optional_tags_completed"].astype(str).str.lower().isin(["true", "1"]),
+            "boulder",
+        ].map(_tag_boulder_number).dropna().nunique()
+        return f"{styled}S/{tagged}T"
+
+    round_progress = " · ".join(
+        f"{item}: {context_counts(item, gender)}" for item in available_rounds
+    )
+    gender_progress = " · ".join(
+        f"{item}: {context_counts(round_name, item)}" for item in available_genders
+    )
+    st.caption(f"Round responses — {round_progress}")
+    st.caption(f"Gender responses — {gender_progress}")
+
+    count_key = plain_key("|".join([chosen_event, round_name, gender, terrain_group]))
+    default_count = 5 if round_name == "Qualification" else 4
+    matching = records.loc[_tag_context_mask(records, chosen_event, round_name, gender, terrain_group)]
+    recorded_counts = pd.to_numeric(matching.get("expected_boulders"), errors="coerce").dropna()
+    if not recorded_counts.empty:
+        default_count = int(recorded_counts.max())
+    with st.expander("Confirm boulder count", expanded=False):
+        expected_boulders = int(st.number_input(
+            "Boulders in this round", min_value=1, max_value=12, value=default_count,
+            step=1, key=f"tag_count_{count_key}",
+            help="The format default is proposed; correct it here when the published round differs.",
+        ))
+        st.caption("Qualification defaults to 5; semi-final/final to 4 until event metadata confirms otherwise.")
+    if f"tag_count_{count_key}" in st.session_state:
+        expected_boulders = int(st.session_state[f"tag_count_{count_key}"])
+    else:
+        expected_boulders = default_count
+
+    boulder_labels = []
+    for number in range(1, expected_boulders + 1):
+        boulder_group = matching.loc[
+            matching["boulder"].map(_tag_boulder_number).eq(number)
+        ]
+        style_count = len(boulder_group)
+        tag_count = int(boulder_group["optional_tags_completed"].astype(str).str.lower().isin(["true", "1"]).sum())
+        boulder_labels.append(f"B{number} · {style_count}S/{tag_count}T")
+    existing_boulder = st.session_state.get("tag_boulder_choice")
+    if existing_boulder not in boulder_labels:
+        existing_number = _tag_boulder_number(existing_boulder)
+        if existing_number and 1 <= existing_number <= expected_boulders:
+            st.session_state.tag_boulder_choice = boulder_labels[existing_number - 1]
+        else:
+            st.session_state.pop("tag_boulder_choice", None)
+    boulder_choice = st.segmented_control(
+        "Boulder", boulder_labels,
+        default=boulder_labels[0] if "tag_boulder_choice" not in st.session_state else None,
+        key="tag_boulder_choice",
+    ) or boulder_labels[0]
+    boulder_number = _tag_boulder_number(boulder_choice) or 1
+    st.caption("S = complete style responses · T = responses with optional movement/hold tags")
+
+    current_boulder = matching.loc[
+        matching["boulder"].map(_tag_boulder_number).eq(boulder_number)
+    ]
+    image_items: list[tuple[str, object]] = []
+    for _, item in current_boulder.iterrows():
+        url = str(item.get("image_public_url") or item.get("image_url") or "").strip()
+        if url:
+            image_items.append((str(item.get("contributor") or "Existing image"), url))
+        local_path = str(item.get("image_in_bundle") or "")
+        if local_path in st.session_state.style_tag_images:
+            image_items.append((str(item.get("contributor") or "Session image"), st.session_state.style_tag_images[local_path]))
+    if image_items:
+        st.markdown("#### Existing boulder images")
+        columns = st.columns(min(3, len(image_items)))
+        for index, (caption, source) in enumerate(image_items[:6]):
+            columns[index % len(columns)].image(source, caption=caption, width="stretch")
+    image_file = st.file_uploader(
+        "Add another boulder image", type=["png", "jpg", "jpeg", "webp"],
+        key=f"tag_image_{count_key}_{boulder_number}",
+        help="Use the full boulder, no climber, and ideally no surrounding boulders.",
+    )
+    st.caption("Best image: full boulder visible · no climber · surrounding boulders cropped out.")
+    if image_file is not None:
+        st.image(image_file, caption="New image preview", width="stretch")
+
+    add_optional_tags = st.checkbox(
+        "I would like to help further and identify holds and movements",
+        value=False, key=f"tag_optional_{count_key}_{boulder_number}",
+    )
+
+    def compact_pair(label: str, key: str, help_text: str = "") -> tuple[int, int]:
+        columns = st.columns([1.7, 2.2, 2.2])
+        columns[0].markdown(f"**{label}**")
+        zone = columns[1].slider(
+            f"Zone {label}", 0, 3, 0, key=f"z_{count_key}_{boulder_number}_{key}",
+            label_visibility="collapsed", help=help_text or None,
+        )
+        top = columns[2].slider(
+            f"Top {label}", 0, 3, 0, key=f"t_{count_key}_{boulder_number}_{key}",
+            label_visibility="collapsed", help=help_text or None,
+        )
+        return top, zone
+
+    with st.form(f"style_tag_fast_{count_key}_{boulder_number}", clear_on_submit=False):
+        st.markdown('<div class="zt-key"><span></span><span class="zt-zone">Z · Zone</span><span class="zt-top">T · Top</span></div>', unsafe_allow_html=True)
+        core_scores = {
+            "physical": compact_pair("Physical", "physical", STYLE_DEFINITIONS["physical"]),
+            "technical": compact_pair("Technical", "technical", STYLE_DEFINITIONS["technical"]),
+            "coordination": compact_pair("Coordination", "coordination", STYLE_DEFINITIONS["coordination"]),
+            "verticality": compact_pair("Wall angle", "verticality", "0 slab · 1 vertical · 2 overhang · 3 roof"),
+        }
+        direction = st.columns([1.7, 2.2, 2.2])
+        direction[0].markdown("**Direction**")
+        zone_direction = direction[1].selectbox(
+            "Zone direction", ["Up", "Diagonal", "Sideways", "Mixed / unclear"],
+            label_visibility="collapsed",
+        )
+        top_direction = direction[2].selectbox(
+            "Top direction", ["Up", "Diagonal", "Sideways", "Mixed / unclear"],
+            label_visibility="collapsed",
+        )
+        optional_scores: dict[str, tuple[int, int]] = {}
+        if add_optional_tags:
+            st.markdown("#### Optional tags")
+            st.caption("Leave 0 when absent or uncertain.")
+            for theme, items in STYLE_TAG_GROUPS.items():
+                with st.expander(theme, expanded=theme in {"Physical qualities", "Move types"}):
+                    for tag_key, tag_label in items:
+                        optional_scores[tag_key] = compact_pair(tag_label, tag_key)
+        details = st.columns(2)
+        notes = details[0].text_area(
+            "Useful context (optional)", placeholder="Alternative beta, deceptive feature, uncertainty..."
+        )
+        confidence = details[1].select_slider(
+            "Confidence", options=["Low", "Moderate", "High"], value="Moderate"
+        )
+        contributor = details[1].text_input("Contributor name or initials (optional)")
+        submitted = st.form_submit_button("Save and continue", type="primary")
+
+    if not submitted and st.session_state.get("tag_last_message"):
+        st.success(str(st.session_state.tag_last_message))
+    if submitted:
+        image_bytes = image_file.getvalue() if image_file is not None else b""
+        if len(image_bytes) > 10 * 1024 * 1024:
+            st.error("Please use an image smaller than 10 MB.")
+        elif not chosen_event:
+            st.error("Choose or enter a competition first.")
+        else:
+            image_hash = hashlib.sha256(image_bytes).hexdigest() if image_bytes else ""
+            suffix = Path(image_file.name).suffix.lower() if image_file is not None else ""
+            stored_image = f"images/{image_hash}{suffix}" if image_hash else ""
+            record: dict[str, object] = {
+                "schema_version": "3.0", "record_type": "style",
+                "submitted_at_utc": datetime.now(timezone.utc).isoformat(),
+                "competition": chosen_event, "competition_date": chosen_date,
+                "source_scope": source_scope, "round": round_name,
+                "gender_terrain": gender, "terrain_group": terrain_group,
+                "boulder": f"B{boulder_number}", "expected_boulders": expected_boulders,
+                "image_name": image_file.name if image_file is not None else "",
+                "image_sha256": image_hash, "image_in_bundle": stored_image,
+                "top_direction": top_direction, "zone_direction": zone_direction,
+                "optional_tags_completed": add_optional_tags,
+                "notes": notes.strip(), "confidence": confidence,
+                "contributor": contributor.strip(),
+            }
+            for score_key, (top_value, zone_value) in {**core_scores, **optional_scores}.items():
+                record[f"top_{score_key}_0_3"] = top_value
+                record[f"zone_{score_key}_0_3"] = zone_value
+            st.session_state.style_tag_rows.append(record)
+            if image_bytes and stored_image:
+                st.session_state.style_tag_images[stored_image] = image_bytes
+            message = "Saved in this session."
+            if backend_url:
+                saved, remote_message = save_style_tag_remotely(backend_url, record, image_bytes)
+                message = remote_message if saved else f"Session saved; shared save failed: {remote_message}"
+                fetch_style_tags_remotely.clear()
+            st.session_state.tag_last_message = message
+            st.session_state.tag_last_boulder = boulder_number
+            st.rerun()
+
+    if st.session_state.get("tag_last_boulder") == boulder_number:
+        actions = st.columns(3)
+        if boulder_number < expected_boulders:
+            if actions[0].button("Next boulder ->", type="primary"):
+                st.session_state.tag_pending_navigation = {
+                    "tag_boulder_choice": boulder_labels[boulder_number],
+                    "tag_last_message": None,
+                }
+                st.rerun()
+        else:
+            round_index = available_rounds.index(round_name)
+            if round_index + 1 < len(available_rounds):
+                if actions[0].button("Next round ->", type="primary"):
+                    st.session_state.tag_pending_navigation = {
+                        "tag_round_choice": available_rounds[round_index + 1],
+                        "tag_boulder_choice": None, "tag_last_message": None,
+                    }
+                    st.rerun()
+            elif len(available_genders) > 1:
+                other_gender = next(item for item in available_genders if item != gender)
+                if actions[0].button(f"Start {other_gender} ->", type="primary"):
+                    st.session_state.tag_pending_navigation = {
+                        "tag_gender_choice": other_gender,
+                        "tag_round_choice": available_rounds[0],
+                        "tag_boulder_choice": None, "tag_last_message": None,
+                    }
+                    st.rerun()
+
+    with st.expander("Flag a mistake or suggest an improvement"):
+        with st.form(f"tag_flag_{count_key}_{boulder_number}"):
+            flag_type = st.selectbox(
+                "Issue", ["Wrong boulder image", "Wrong competition / round / terrain",
+                          "Duplicate", "Form improvement", "Other"]
+            )
+            flag_note = st.text_area("What should be corrected or improved?")
+            flag_submit = st.form_submit_button("Send flag")
+        if flag_submit:
+            if not flag_note.strip():
+                st.warning("Add a short explanation so the flag can be acted on.")
+            else:
+                flag_record = {
+                    "schema_version": "3.0", "record_type": "flag",
+                    "submitted_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "competition": chosen_event, "competition_date": chosen_date,
+                    "round": round_name, "gender_terrain": gender,
+                    "terrain_group": terrain_group, "boulder": f"B{boulder_number}",
+                    "flag_type": flag_type, "flag_note": flag_note.strip(),
+                }
+                st.session_state.style_tag_rows.append(flag_record)
+                if backend_url:
+                    save_style_tag_remotely(backend_url, flag_record, b"")
+                    fetch_style_tags_remotely.clear()
+                st.success("Flag saved. Thank you.")
+
+    session_records = pd.DataFrame(st.session_state.style_tag_rows)
+    if not session_records.empty:
+        with st.expander("Session backup", expanded=False):
+            st.dataframe(session_records, hide_index=True, width="stretch", height=240)
+            csv_bytes = session_records.to_csv(index=False).encode("utf-8")
+            st.download_button("Download session CSV", csv_bytes, "boulder_style_tags_v3.csv", "text/csv")
+    st.caption(
+        "Shared database connected." if backend_url else
+        "Shared database is not connected in this deployment; session CSV remains available as a backup."
+    )
+    if standalone:
+        st.info("This separate public tool keeps image and tagging traffic away from the analysis dashboard.")
 
 
 def main() -> None:

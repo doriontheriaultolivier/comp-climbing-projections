@@ -11,13 +11,17 @@ from comp_climbing_app import DATA, render_style_tagging_v2, style_tag_backend_u
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=1)
 def event_history() -> pd.DataFrame:
     path = DATA / "boulder_overview_history.parquet"
+    columns = [
+        "event_name", "event_date", "source_scope", "source_event_id",
+        "round_group", "confirmed_procedure", "pool",
+    ]
     if not path.exists():
-        return pd.DataFrame(columns=["event_name", "event_date"])
+        return pd.DataFrame(columns=columns)
     try:
-        return pd.read_parquet(path, columns=["event_name", "event_date"])
+        return pd.read_parquet(path, columns=columns)
     except (KeyError, ValueError):
         frame = pd.read_parquet(path)
-        available = [column for column in ["event_name", "event_date"] if column in frame]
+        available = [column for column in columns if column in frame]
         return frame[available]
 
 

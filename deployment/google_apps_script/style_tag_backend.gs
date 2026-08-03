@@ -14,8 +14,35 @@ function jsonResponse(payload) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function doGet() {
-  return jsonResponse({ok: true, service: "comp-climbing-style-tags", version: "2.0"});
+function doGet(event) {
+  const action = event && event.parameter ? String(event.parameter.action || "") : "";
+  if (action !== "list") {
+    return jsonResponse({ok: true, service: "comp-climbing-style-tags", version: "3.0"});
+  }
+  try {
+    const folder = getDestinationFolder();
+    const spreadsheet = getOrCreateSheet(folder);
+    const sheet = spreadsheet.getSheetByName("tags") || spreadsheet.getSheets()[0];
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return jsonResponse({ok: true, records: []});
+    const requested = Number(event.parameter.limit || 1500);
+    const limit = Math.max(1, Math.min(3000, requested));
+    const firstRow = Math.max(2, lastRow - limit + 1);
+    const values = sheet.getRange(firstRow, 1, lastRow - firstRow + 1, 11).getValues();
+    const records = values.map(function(row) {
+      let record = {};
+      try { record = JSON.parse(row[10] || "{}"); } catch (error) {}
+      record.image_file_id = row[8] || record.image_file_id || "";
+      record.image_url = row[9] || record.image_url || "";
+      record.image_public_url = row[8]
+        ? "https://drive.google.com/uc?export=view&id=" + row[8]
+        : (record.image_public_url || "");
+      return record;
+    });
+    return jsonResponse({ok: true, records: records});
+  } catch (error) {
+    return jsonResponse({ok: false, message: String(error), records: []});
+  }
 }
 
 function getDestinationFolder() {
@@ -80,6 +107,7 @@ function doPost(event) {
          record.gender_terrain, record.boulder, record.image_name].filter(Boolean).join("_")
       );
       imageFile = folder.createFile(Utilities.newBlob(bytes, mime, name));
+      imageFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
     }
 
     const spreadsheet = getOrCreateSheet(folder);
@@ -102,6 +130,9 @@ function doPost(event) {
       message: "Saved to Google Drive",
       row: sheet.getLastRow(),
       image_file_id: imageFile ? imageFile.getId() : "",
+      image_public_url: imageFile
+        ? "https://drive.google.com/uc?export=view&id=" + imageFile.getId()
+        : "",
     });
   } catch (error) {
     return jsonResponse({ok: false, message: String(error)});

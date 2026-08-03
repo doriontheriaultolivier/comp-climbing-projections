@@ -104,19 +104,42 @@ class AppSmokeTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(app.title[0].value, "Comp Climbing Boulder Tags")
         slider_labels = {item.label for item in app.slider}
-        self.assertIn("🟠 Top - Physical", slider_labels)
-        self.assertIn("🔵 Zone - Physical", slider_labels)
+        self.assertIn("Top Physical", slider_labels)
+        self.assertIn("Zone Physical", slider_labels)
         self.assertNotIn("Up to 3 moves before zone", {item.label for item in app.text_area})
 
         optional = next(
             item for item in app.checkbox
-            if item.label == "I would like to help further and identify tags"
+            if item.label == "I would like to help further and identify holds and movements"
         )
         optional.set_value(True).run(timeout=120)
         self.assertFalse(app.exception)
         slider_labels = {item.label for item in app.slider}
-        self.assertIn("🟠 Top - Slopers", slider_labels)
-        self.assertIn("🔵 Zone - Dyno", slider_labels)
+        self.assertIn("Top Slopers", slider_labels)
+        self.assertIn("Zone Dyno", slider_labels)
+
+    def test_style_tagger_save_and_next_boulder(self) -> None:
+        app = AppTest.from_file(str(ROOT / "style_tagging_app.py"))
+        app.run(timeout=120)
+        next(item for item in app.button if item.label == "Save and continue").click().run(
+            timeout=120
+        )
+        self.assertFalse(app.exception)
+        self.assertIn("Next boulder ->", [item.label for item in app.button])
+        boulder = next(
+            item for item in app.segmented_control if item.label == "Boulder"
+        )
+        self.assertTrue(any(
+            option.startswith("B1 · 1S/0T") for option in boulder.options
+        ))
+        next(item for item in app.button if item.label == "Next boulder ->").click().run(
+            timeout=120
+        )
+        self.assertFalse(app.exception)
+        boulder = next(
+            item for item in app.segmented_control if item.label == "Boulder"
+        )
+        self.assertTrue(boulder.value.startswith("B2"))
 
     def test_physical_transfer_plot_has_saturation_curve_and_sufficiency_tags(self) -> None:
         frame = pd.DataFrame({
