@@ -1103,6 +1103,9 @@ def render_focus_hypotheses(
             hypothesis = "Protect the improving training process; add WR starts selectively rather than chasing participation volume."
         else:
             hypothesis = "Prioritize raising repeatable performance; choose competitions that answer a specific readiness question."
+        analogy = exposure_analogy(history, athlete.get("pool"), global_elo, momentum)
+        if analogy:
+            hypothesis += " " + analogy
         cards.append((friendly_name(athlete["athlete_name"]), hypothesis))
     if cards:
         st.markdown("#### Working hypotheses")
@@ -1117,6 +1120,73 @@ def render_focus_hypotheses(
             "exposure—not causal training prescriptions. More starts can reveal a "
             "rating more clearly, but the current data do not prove that starts cause improvement."
         )
+
+
+def exposure_analogy(
+    history: pd.DataFrame, pool: str, level: float, momentum: float
+) -> str:
+    """Describe—not causally estimate—one-year outcomes for similar prior anchors."""
+
+    if history.empty or not np.isfinite(level):
+        return ""
+    cohort = exposure_reference(history)
+    if cohort.empty:
+        return ""
+    cohort = cohort.loc[cohort["pool"].eq(pool)]
+    similar = cohort.loc[
+        cohort["anchor_rating"].sub(level).abs().le(150)
+        & cohort["prior_momentum"].sub(momentum).abs().le(75)
+    ]
+    if len(similar) < 8:
+        return ""
+    lower = similar.loc[similar["ifsc_starts"].lt(3), "next_change"]
+    higher = similar.loc[similar["ifsc_starts"].ge(3), "next_change"]
+    if len(lower) < 3 or len(higher) < 3:
+        return ""
+    difference = float(higher.median() - lower.median())
+    return (
+        f"Among {len(similar)} similar one-year historical cases, athletes with 3+ "
+        f"IFSC starts changed {difference:+.0f} Elo more than those with 0–2. "
+        "Treat this as an exposure analogy, not a causal effect."
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=1)
+def exposure_reference(history: pd.DataFrame) -> pd.DataFrame:
+    rows = history.copy()
+    rows["event_date"] = pd.to_datetime(rows["event_date"], errors="coerce")
+    as_of = pd.Timestamp(rows["event_date"].max())
+    cutoff = as_of - pd.Timedelta(days=365)
+    prior_cutoff = cutoff - pd.Timedelta(days=365)
+    before = rows.loc[rows["event_date"].le(cutoff)].sort_values("event_date")
+    if before.empty:
+        return pd.DataFrame()
+    keys = ["pool", "global_id"]
+    anchor = before.groupby(keys, as_index=False).tail(1)[
+        [*keys, "rating_after"]
+    ].rename(columns={"rating_after": "anchor_rating"})
+    prior = before.loc[before["event_date"].le(prior_cutoff)].groupby(
+        keys, as_index=False
+    ).tail(1)[[*keys, "rating_after"]].rename(
+        columns={"rating_after": "prior_rating"}
+    )
+    future = rows.loc[rows["event_date"].gt(cutoff)].sort_values("event_date")
+    end = future.groupby(keys, as_index=False).tail(1)[
+        [*keys, "rating_after"]
+    ].rename(columns={"rating_after": "end_rating"})
+    ifsc_starts = (
+        future.loc[future["source_scope"].eq("IFSC")]
+        .groupby(keys)["source_event_id"].nunique()
+        .rename("ifsc_starts")
+        .reset_index()
+    )
+    cohort = anchor.merge(prior, on=keys).merge(end, on=keys).merge(
+        ifsc_starts, on=keys, how="left"
+    )
+    cohort["ifsc_starts"] = cohort["ifsc_starts"].fillna(0)
+    cohort["prior_momentum"] = cohort["anchor_rating"] - cohort["prior_rating"]
+    cohort["next_change"] = cohort["end_rating"] - cohort["anchor_rating"]
+    return cohort
 
 
 def render_olympics(
