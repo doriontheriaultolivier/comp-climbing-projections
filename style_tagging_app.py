@@ -10,11 +10,14 @@ from comp_climbing_app import DATA, render_style_tagging_v2, style_tag_backend_u
 
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=1)
 def event_history() -> pd.DataFrame:
-    path = DATA / "boulder_overview_history.parquet"
     columns = [
         "event_name", "event_date", "source_scope", "source_event_id",
         "round_group", "confirmed_procedure", "pool",
     ]
+    compact_path = DATA / "style_event_catalog.csv"
+    if compact_path.exists():
+        return pd.read_csv(compact_path, low_memory=False)
+    path = DATA / "boulder_overview_history.parquet"
     if not path.exists():
         return pd.DataFrame(columns=columns)
     try:
