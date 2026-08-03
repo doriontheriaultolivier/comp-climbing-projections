@@ -874,10 +874,17 @@ def render_wr_pool(
     )
     country_pool = pool.loc[pool["country"].isin(["CAN", *countries])].dropna(subset=["WR-ELO"])
     if not country_pool.empty:
+        country_pool = country_pool.copy()
+        country_pool["Included rounds"] = pd.to_numeric(
+            country_pool.get("WR-ELO evidence"), errors="coerce"
+        ).fillna(0).astype(int)
         comparison = px.strip(
             country_pool, x="country", y="WR-ELO", color="country",
             hover_name="display_name",
-            hover_data={"world_event_rank": True, "starts_365": True},
+            hover_data={
+                "world_event_rank": True, "starts_365": True,
+                "Included rounds": True,
+            },
             title="Actual WR-ELO distribution of current participants",
         )
         comparison.update_traces(marker={"size": 10, "opacity": 0.65})
@@ -933,10 +940,17 @@ def render_progression(
         ).drop_duplicates(["pool", "global_id"])
     cohort["Age group"] = cohort["age"].map(age_group)
     plot = cohort.dropna(subset=["age", "Global-ELO"])
+    plot = plot.copy()
+    plot["Included rounds"] = pd.to_numeric(
+        plot.get("Global-ELO evidence"), errors="coerce"
+    ).fillna(0).astype(int)
     figure = px.scatter(
         plot, x="age", y="Global-ELO", color="Age group", symbol="gender",
         hover_name="display_name",
-        hover_data={"cnr_rank": True, "momentum": ":.1f", "country": True},
+        hover_data={
+            "cnr_rank": True, "momentum": ":.1f", "country": True,
+            "Included rounds": True,
+        },
         title="Current Canadian pathway — one Open World-readiness scale",
     )
     figure.update_traces(marker={"size": 10, "opacity": 0.65})
@@ -962,7 +976,8 @@ def render_progression(
             on=["pool", "global_id"], how="left",
         )
         grouped = pathway.groupby(["gender", "age_year"], as_index=False).agg(
-            rating=("rating_after", "mean"), athletes=("global_id", "nunique")
+            rating=("rating_after", "mean"), athletes=("global_id", "nunique"),
+            rounds=("global_id", "size"),
         )
         grouped = grouped.loc[grouped["athletes"].ge(3)]
         if not grouped.empty:
@@ -970,6 +985,14 @@ def render_progression(
                 figure.add_trace(go.Scatter(
                     x=gender_rows["age_year"], y=gender_rows["rating"], mode="lines",
                     name=f"Current WR top-10 history — {gender}",
+                    customdata=np.column_stack([
+                        gender_rows["athletes"], gender_rows["rounds"],
+                    ]),
+                    hovertemplate=(
+                        "Age: %{x:.1f}<br>Average Global-ELO: %{y:.0f}"
+                        "<br>Athletes: %{customdata[0]:.0f}"
+                        "<br>Included rounds: %{customdata[1]:.0f}<extra>%{fullData.name}</extra>"
+                    ),
                     line={
                         "color": PALETTE["teal"] if gender == "Men" else PALETTE["blue"],
                         "width": 3, "dash": "dot",
@@ -1017,9 +1040,19 @@ def progression_projection(
         ].sort_values("event_date")
         if rows.empty:
             continue
+        rows = rows.copy()
+        rows["included_rounds"] = np.arange(1, len(rows) + 1)
         figure.add_trace(go.Scatter(
             x=rows["event_date"], y=rows["rating_after"], mode="lines",
             name=f"{athlete['athlete_name']} — observed", line={"color": color, "width": 3},
+            customdata=np.column_stack([
+                rows["event_name"], rows["round_group"], rows["included_rounds"],
+            ]),
+            hovertemplate=(
+                "%{x|%Y-%m-%d}<br>Global-ELO: %{y:.0f}"
+                "<br>%{customdata[0]} · %{customdata[1]}"
+                "<br>Included rounds: %{customdata[2]:.0f}<extra>%{fullData.name}</extra>"
+            ),
         ))
         momentum = float(np.clip(athlete.get("momentum", 0.0), -150, 150))
         age_year = int(round(athlete.get("age", np.nan))) if pd.notna(athlete.get("age")) else -1
@@ -1028,6 +1061,9 @@ def progression_projection(
         future_dates = pd.date_range(as_of, periods=13, freq="MS")
         central = float(athlete["Global-ELO"]) + projected_rate * np.arange(13) / 12
         uncertainty = 35 + 4 * np.arange(13)
+        current_evidence = int(pd.to_numeric(
+            pd.Series([athlete.get("Global-ELO evidence", len(rows))]), errors="coerce"
+        ).fillna(len(rows)).iloc[0])
         figure.add_trace(go.Scatter(
             x=future_dates, y=central, mode="lines",
             name=(
@@ -1035,6 +1071,12 @@ def progression_projection(
                 f"({projected_rate:+.0f}/year)"
             ),
             line={"color": color, "width": 3, "dash": "dash"},
+            customdata=np.full((len(future_dates), 1), current_evidence),
+            hovertemplate=(
+                "%{x|%Y-%m}<br>Projected Global-ELO: %{y:.0f}"
+                "<br>Current rating evidence: %{customdata[0]:.0f} rounds"
+                "<extra>%{fullData.name}</extra>"
+            ),
         ))
         figure.add_trace(go.Scatter(
             x=list(future_dates) + list(future_dates[::-1]),
@@ -1482,47 +1524,107 @@ def physical_transfer_figure(
     y: str,
     title: str,
     selected: list[str] | None = None,
-) -> tuple[go.Figure, float, bool]:
-    """Plot the fitted test-to-rating line and cautious athlete transfer residuals."""
+) -> tuple[go.Figure, float, dict[str, float]]:
+    """Plot Bayesian test-to-rating expectation and athlete transfer probabilities."""
     plot = frame.dropna(subset=[x, y]).copy()
     plot[x] = pd.to_numeric(plot[x], errors="coerce")
     plot[y] = pd.to_numeric(plot[y], errors="coerce")
     plot = plot.dropna(subset=[x, y])
     plot["name_key"] = plot["athlete_name"].map(plain_key)
     rho = float(plot[x].rank().corr(plot[y].rank())) if len(plot) >= 3 else np.nan
-    usable = len(plot) >= 12 and plot[x].nunique() >= 4 and np.isfinite(rho) and rho >= 0.20
     figure = go.Figure()
     if plot.empty:
-        return figure, rho, False
+        return figure, rho, {
+            "probability_positive": np.nan, "slope_low": np.nan,
+            "slope_high": np.nan, "draws": 0,
+        }
 
-    slope, intercept = (
-        np.polyfit(plot[x], plot[y], 1)
-        if plot[x].nunique() >= 2 else (0.0, float(plot[y].median()))
+    # Conjugate Bayesian linear regression on standardized values. The weak
+    # Normal-inverse-gamma prior prevents tiny samples from looking certain,
+    # while preserving their direction instead of applying a binary gate.
+    x_mean, x_sd = float(plot[x].mean()), float(plot[x].std(ddof=0))
+    y_mean, y_sd = float(plot[y].mean()), float(plot[y].std(ddof=0))
+    x_sd = x_sd if np.isfinite(x_sd) and x_sd > 0 else 1.0
+    y_sd = y_sd if np.isfinite(y_sd) and y_sd > 0 else 1.0
+    x_standard = (plot[x].to_numpy(float) - x_mean) / x_sd
+    y_standard = (plot[y].to_numpy(float) - y_mean) / y_sd
+    design = np.column_stack([np.ones(len(plot)), x_standard])
+    prior_precision = np.diag([0.01, 0.04])
+    posterior_precision = prior_precision + design.T @ design
+    posterior_covariance = np.linalg.inv(posterior_precision)
+    posterior_mean = posterior_covariance @ design.T @ y_standard
+    prior_shape, prior_scale = 2.0, 1.0
+    posterior_shape = prior_shape + len(plot) / 2
+    scale_term = float(
+        y_standard @ y_standard
+        - posterior_mean @ posterior_precision @ posterior_mean
     )
-    plot["test_expected_rating"] = intercept + slope * plot[x]
+    posterior_scale = max(1e-6, prior_scale + 0.5 * scale_term)
+    rng = np.random.default_rng(20260803 + len(plot))
+    draw_count = 1200
+    precision_draws = rng.gamma(
+        shape=posterior_shape, scale=1.0 / posterior_scale, size=draw_count
+    )
+    variance_draws = 1.0 / precision_draws
+    normal_draws = rng.normal(size=(draw_count, 2))
+    covariance_root = np.linalg.cholesky(posterior_covariance)
+    beta_draws = posterior_mean + (
+        normal_draws @ covariance_root.T
+    ) * np.sqrt(variance_draws)[:, None]
+    mean_draws = (design @ beta_draws.T).T * y_sd + y_mean
+    fitted_mean = mean_draws.mean(axis=0)
+    slope_draws = beta_draws[:, 1] * y_sd / x_sd
+    probability_positive = float(np.mean(slope_draws > 0))
+    slope_low, slope_high = np.quantile(slope_draws, [0.05, 0.95])
+
+    plot["test_expected_rating"] = fitted_mean
     plot["transfer_residual"] = plot[y] - plot["test_expected_rating"]
     median_residual = float(plot["transfer_residual"].median())
     mad = float((plot["transfer_residual"] - median_residual).abs().median())
     residual_scale = 1.4826 * mad
     if not np.isfinite(residual_scale) or residual_scale < 1:
         residual_scale = float(plot["transfer_residual"].std(ddof=1))
-    threshold = max(50.0, 0.75 * residual_scale) if np.isfinite(residual_scale) else np.inf
-    plot["transfer_reading"] = "Near the test-only trend"
-    if usable:
-        plot.loc[
-            plot["transfer_residual"].gt(threshold), "transfer_reading"
-        ] = "Possible opportunity: performance ahead of this test"
-        plot.loc[
-            plot["transfer_residual"].lt(-threshold), "transfer_reading"
-        ] = "Possible lower transfer: test ahead of performance"
+    practical_margin = max(35.0, 0.35 * residual_scale) if np.isfinite(residual_scale) else 35.0
+    actual = plot[y].to_numpy(float)[None, :]
+    probability_opportunity = np.mean(actual > mean_draws + practical_margin, axis=0)
+    probability_lower_transfer = np.mean(actual < mean_draws - practical_margin, axis=0)
+    # A residual is only meaningful for training direction to the extent that
+    # the population relationship itself is credibly positive.
+    probability_opportunity *= probability_positive
+    probability_lower_transfer *= probability_positive
+    plot["probability_opportunity"] = probability_opportunity
+    plot["probability_lower_transfer"] = probability_lower_transfer
+    plot["posterior_direction_confidence"] = np.maximum(
+        probability_opportunity, probability_lower_transfer
+    )
+    evidence_column = f"{y} evidence"
+    plot["rating_rounds"] = pd.to_numeric(
+        plot.get(evidence_column, pd.Series(0, index=plot.index)), errors="coerce"
+    ).fillna(0).clip(lower=0)
+    evidence_ceiling = float(plot["rating_rounds"].quantile(0.90))
+    if evidence_ceiling > 0:
+        plot["evidence_opacity"] = (
+            0.30
+            + 0.65
+            * np.log1p(plot["rating_rounds"])
+            / np.log1p(evidence_ceiling)
+        ).clip(0.30, 0.95)
     else:
-        plot["transfer_reading"] = "Relationship too weak for a training tag"
+        plot["evidence_opacity"] = 0.72
+    plot["transfer_reading"] = "Direction uncertain"
+    plot.loc[
+        plot["probability_opportunity"].gt(plot["probability_lower_transfer"]),
+        "transfer_reading",
+    ] = "Possible opportunity: performance ahead of test"
+    plot.loc[
+        plot["probability_lower_transfer"].gt(plot["probability_opportunity"]),
+        "transfer_reading",
+    ] = "Possible lower transfer: test ahead of performance"
 
     colors = {
-        "Possible opportunity: performance ahead of this test": PALETTE["coral"],
+        "Possible opportunity: performance ahead of test": PALETTE["coral"],
         "Possible lower transfer: test ahead of performance": PALETTE["blue"],
-        "Near the test-only trend": "#A2B5B1",
-        "Relationship too weak for a training tag": "#C7D0CE",
+        "Direction uncertain": "#A2B5B1",
     }
     selected_keys = {plain_key(name) for name in (selected or [])}
     for reading, group in plot.groupby("transfer_reading", sort=False):
@@ -1531,26 +1633,43 @@ def physical_transfer_figure(
             for name, key in zip(group["athlete_name"], group["name_key"])
         ]
         line_widths = [3 if key in selected_keys else 0 for key in group["name_key"]]
+        opacities = group["evidence_opacity"].to_numpy(float)
         figure.add_trace(go.Scatter(
             x=group[x], y=group[y], mode="markers+text", text=labels,
             textposition="top center", name=reading,
             marker={
-                "size": 11, "opacity": 0.75, "color": colors.get(reading, "#A2B5B1"),
+                "size": 11, "opacity": opacities, "color": colors.get(reading, "#A2B5B1"),
                 "line": {"width": line_widths, "color": PALETTE["ink"]},
             },
             customdata=np.column_stack([
                 group["athlete_name"], group["test_expected_rating"],
-                group["transfer_residual"],
+                group["transfer_residual"], 100 * group["probability_opportunity"],
+                100 * group["probability_lower_transfer"], group["rating_rounds"],
             ]),
             hovertemplate=(
                 "%{customdata[0]}<br>Test result: %{x:.2f}<br>Actual rating: %{y:.0f}"
                 "<br>Rating expected from this test alone: %{customdata[1]:.0f}"
-                "<br>Difference: %{customdata[2]:+.0f} Elo<extra>%{fullData.name}</extra>"
+                "<br>Difference: %{customdata[2]:+.0f} Elo"
+                "<br>Posterior P(physical opportunity): %{customdata[3]:.0f}%"
+                "<br>Posterior P(lower transfer): %{customdata[4]:.0f}%"
+                "<br>Included rating rounds: %{customdata[5]:.0f}"
+                "<extra>%{fullData.name}</extra>"
             ),
         ))
     x_line = np.array([float(plot[x].min()), float(plot[x].max())])
+    line_design = np.column_stack([np.ones(2), (x_line - x_mean) / x_sd])
+    line_draws = (line_design @ beta_draws.T).T * y_sd + y_mean
+    line_mean = line_draws.mean(axis=0)
+    line_low, line_high = np.quantile(line_draws, [0.05, 0.95], axis=0)
     figure.add_trace(go.Scatter(
-        x=x_line, y=intercept + slope * x_line, mode="lines",
+        x=np.concatenate([x_line, x_line[::-1]]),
+        y=np.concatenate([line_high, line_low[::-1]]),
+        fill="toself", fillcolor=transparent(PALETTE["ink"], 0.10),
+        line={"color": "rgba(0,0,0,0)"}, hoverinfo="skip",
+        name="90% credible interval",
+    ))
+    figure.add_trace(go.Scatter(
+        x=x_line, y=line_mean, mode="lines",
         line={"color": PALETTE["ink"], "width": 2, "dash": "dash"},
         name="Rating expected from this test alone",
         hoverinfo="skip",
@@ -1561,7 +1680,11 @@ def physical_transfer_figure(
         height=590, legend_title="Test-to-performance reading",
         margin={"l": 20, "r": 20, "t": 70, "b": 30},
     )
-    return figure, rho, usable
+    return figure, rho, {
+        "probability_positive": probability_positive,
+        "slope_low": float(slope_low), "slope_high": float(slope_high),
+        "draws": draw_count,
+    }
 
 
 def render_physical_strength(
@@ -1580,6 +1703,22 @@ def render_physical_strength(
     latest = data.get("physical_latest", pd.DataFrame())
     screen = data.get("physical_screen", pd.DataFrame())
     priorities = data.get("physical_priorities", pd.DataFrame())
+    if not latest.empty:
+        latest = latest.copy()
+        latest["name_key"] = latest["athlete_name"].map(plain_key)
+        evidence_columns = [
+            column for column in [f"{family} evidence" for family in RATING_ORDER]
+            if column in athletes
+        ]
+        if evidence_columns:
+            evidence_lookup = (
+                athletes[["pool", "name_key", *evidence_columns]]
+                .sort_values(evidence_columns[0], ascending=False)
+                .drop_duplicates(["pool", "name_key"])
+            )
+            latest = latest.merge(
+                evidence_lookup, on=["pool", "name_key"], how="left"
+            )
 
     if view == "Population priorities":
         if screen.empty:
@@ -1796,23 +1935,19 @@ def render_physical_strength(
         if plot.empty:
             st.info("No linked competition rating is available for this test yet.")
         else:
-            figure, current_rho, transfer_usable = physical_transfer_figure(
+            figure, current_rho, transfer_evidence = physical_transfer_figure(
                 plot, "value", rating, f"{test} and current {rating}", selected
             )
             st.plotly_chart(figure, width="stretch", theme=None)
-            if transfer_usable:
-                st.info(
-                    f"Current athlete-level rank relationship: {current_rho:.2f}. Athletes above "
-                    "the dashed line perform better than this test alone predicts and may have a "
-                    "physical opportunity if the quality is trainable and truly limiting. Athletes "
-                    "below it already test ahead of performance; more of the same quality may have "
-                    "lower transfer than technical, tactical or style-specific work."
-                )
-            else:
-                st.warning(
-                    f"Current athlete-level rank relationship: {current_rho:.2f}. It is too weak "
-                    "or too sparse for athlete opportunity labels, so the line is descriptive only."
-                )
+            st.info(
+                f"Current rank relationship: {current_rho:.2f}. Bayesian probability that the "
+                f"population relationship is positive: "
+                f"{100 * transfer_evidence['probability_positive']:.0f}% "
+                f"(90% slope interval {transfer_evidence['slope_low']:.1f} to "
+                f"{transfer_evidence['slope_high']:.1f} Elo per test unit). Athlete hover shows "
+                "the posterior probability of each direction; marker density shows how many "
+                "rounds support the displayed Elo."
+            )
             st.caption(
                 f"{plot['testing_person_key'].nunique()} linked athletes. Residual tags are screening "
                 "hypotheses, not causal training prescriptions. Use Population priorities for the "
@@ -1840,10 +1975,11 @@ def render_physical_strength(
     profiles["name_key"] = profiles["athlete_name"].map(plain_key)
     rating_columns = [
         "pool", "name_key", "Global-ELO", "IFSC-ELO", "WR-ELO",
+        "Global-ELO evidence", "IFSC-ELO evidence", "WR-ELO evidence",
         "gender", "age",
     ]
     athlete_ratings = athletes[[
-        column for column in rating_columns + ["Global-ELO evidence"]
+        column for column in rating_columns
         if column in athletes
     ]].copy()
     athlete_ratings = athlete_ratings.sort_values(
@@ -1868,21 +2004,18 @@ def render_physical_strength(
         plot[value_column] = pd.to_numeric(plot[value_column], errors="coerce")
         plot[rating] = pd.to_numeric(plot[rating], errors="coerce")
         plot = plot.dropna(subset=[value_column, rating])
-        figure, grade_rho, grade_transfer_usable = physical_transfer_figure(
+        figure, grade_rho, grade_transfer_evidence = physical_transfer_figure(
             plot, value_column, rating, f"{test} and {rating}", selected
         )
         st.plotly_chart(figure, width="stretch", theme=None)
-        if grade_transfer_usable:
-            st.info(
-                f"Current athlete-level rank relationship: {grade_rho:.2f}. The dashed line shows "
-                "the rating expected from this self-report alone; large differences identify "
-                "questions to investigate, not proof of a limiter."
-            )
-        else:
-            st.warning(
-                f"Current athlete-level rank relationship: {grade_rho:.2f}. This relationship "
-                "is too weak or sparse for individual opportunity labels."
-            )
+        st.info(
+            f"Current rank relationship: {grade_rho:.2f}. Bayesian probability that the "
+            f"population relationship is positive: "
+            f"{100 * grade_transfer_evidence['probability_positive']:.0f}% "
+            f"(90% slope interval {grade_transfer_evidence['slope_low']:.1f} to "
+            f"{grade_transfer_evidence['slope_high']:.1f} Elo per grade). The dashed line and "
+            "athlete probabilities identify questions to investigate, not proof of a limiter."
+        )
         st.caption(
             f"{len(plot)} linked athletes are visible for this exact grade × rating pair. "
             "Grade values are converted to the common V-scale used in the testing source."

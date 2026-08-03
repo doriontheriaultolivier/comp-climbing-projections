@@ -118,14 +118,14 @@ class AppSmokeTests(unittest.TestCase):
             "Global-ELO": [1800 + 25 * index for index in range(14)],
         })
         frame.loc[13, "Global-ELO"] += 250
-        figure, rho, usable = physical_transfer_figure(
+        figure, rho, evidence = physical_transfer_figure(
             frame, "value", "Global-ELO", "Test transfer"
         )
-        self.assertTrue(usable)
         self.assertGreater(rho, 0.2)
+        self.assertGreater(evidence["probability_positive"], 0.5)
         trace_names = {trace.name for trace in figure.data}
         self.assertIn("Rating expected from this test alone", trace_names)
-        self.assertIn("Possible opportunity: performance ahead of this test", trace_names)
+        self.assertIn("Possible opportunity: performance ahead of test", trace_names)
 
 
 if __name__ == "__main__":
