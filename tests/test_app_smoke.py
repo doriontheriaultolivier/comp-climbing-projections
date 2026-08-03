@@ -23,7 +23,10 @@ class AppSmokeTests(unittest.TestCase):
     def test_progression_view(self) -> None:
         app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
         app.run(timeout=120)
-        app.segmented_control[2].set_value("Global progression").run(timeout=120)
+        next(
+            item for item in app.segmented_control
+            if item.label == "Overview section"
+        ).set_value("Global progression").run(timeout=120)
         self.assertFalse(app.exception)
         self.assertEqual(len(app.get("plotly_chart")), 2)
 
@@ -31,18 +34,15 @@ class AppSmokeTests(unittest.TestCase):
         app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
         app.run(timeout=120)
 
-        round_format = next(
-            item for item in app.selectbox if item.label == "Round format"
+        round_evidence = next(
+            item for item in app.selectbox if item.label == "Round evidence"
         )
-        round_format.select("Onsight").run(timeout=120)
+        round_evidence.select("Qualification").run(timeout=120)
         self.assertFalse(app.exception)
-        self.assertEqual(
-            next(item for item in app.selectbox if item.label == "Round format").value,
-            "Onsight",
-        )
         next(
-            item for item in app.selectbox if item.label == "Round format"
-        ).select("Scramble").run(timeout=120)
+            item for item in app.selectbox
+            if item.label == "Qualification procedure"
+        ).select("Onsight").run(timeout=120)
         self.assertFalse(app.exception)
 
         for section in ["IFSC Pool", "WR Pool"]:
@@ -53,6 +53,24 @@ class AppSmokeTests(unittest.TestCase):
             overview.set_value(section).run(timeout=120)
             self.assertFalse(app.exception, section)
             self.assertIn(section, [item.value for item in app.subheader])
+
+    def test_physical_and_maths_workspaces(self) -> None:
+        app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
+        app.run(timeout=120)
+        workspace = next(
+            item for item in app.segmented_control if item.label == "Workspace"
+        )
+        workspace.set_value("Maths behind").run(timeout=120)
+        self.assertFalse(app.exception)
+        self.assertIn("Maths behind", [item.value for item in app.header])
+
+        workspace = next(
+            item for item in app.segmented_control if item.label == "Workspace"
+        )
+        workspace.set_value("Physical Strength").run(timeout=120)
+        self.assertFalse(app.exception)
+        self.assertIn("Physical Strength", [item.value for item in app.header])
+        self.assertGreaterEqual(len(app.get("plotly_chart")), 1)
 
     def test_four_governed_outcome_reference_lines(self) -> None:
         calibration = pd.read_csv(ROOT / "data" / "boulder_elo_calibration.csv")

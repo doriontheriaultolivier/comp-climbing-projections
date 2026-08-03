@@ -1,0 +1,7 @@
+gate,observed,required,passed,evaluation_window,scope,production_effect
+Mean threshold Brier relative improvement,-0.003356978503257875,0.015,False,2025-01-01 onward,Exact frozen IFSC fields; metric-matched availability,None - research comparison only
+Competition-clustered Brier improvement lower bound,-0.0010206538350859677,0.0,False,2025-01-01 onward,Exact frozen IFSC fields; metric-matched availability,None - research comparison only
+Rank Spearman non-inferiority,0.005538323906355447,0.0,True,2025-01-01 onward,Exact frozen IFSC fields; metric-matched availability,None - research comparison only
+Winner log-loss maximum worsening,0.010302618379793849,0.02,True,2025-01-01 onward,Exact frozen IFSC fields; metric-matched availability,None - research comparison only
+Worst discipline/gender threshold-Brier worsening,0.023841897686853134,0.02,False,2025-01-01 onward,Exact frozen IFSC fields; metric-matched availability,None - research comparison only
+FINAL DECISION,2.0,5.0,False,2025-01-01 onward,Exact frozen IFSC fields; metric-matched availability,NOT PROMOTED - production remains unchanged

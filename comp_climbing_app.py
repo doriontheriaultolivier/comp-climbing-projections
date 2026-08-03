@@ -21,12 +21,16 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 RATING_ORDER = ["Global-ELO", "IFSC-ELO", "WR-ELO"]
-FORMAT_OPTIONS = ["All formats", "Onsight", "Flash", "Scramble"]
+ROUND_OPTIONS = ["All rounds", "Qualification", "Semi-final", "Final"]
+QUALIFICATION_FORMATS = ["Flash + Onsight", "Flash", "Onsight"]
 ALL_RATINGS = [
-    "Global-ELO", "Global-ELO-Onsight", "Global-ELO-Scramble",
-    "Global-ELO-Flash", "WR-ELO", "WR-ELO-Qualies", "WR-ELO-Semies",
-    "WR-ELO-Finals", "IFSC-ELO", "IFSC-ELO-Qualies",
-    "IFSC-ELO-Semies", "IFSC-ELO-Finals",
+    "Global-ELO", "Global-ELO-Qualies", "Global-ELO-Qualies-Flash",
+    "Global-ELO-Qualies-Onsight", "Global-ELO-Semies", "Global-ELO-Finals",
+    "Global-ELO-Onsight", "Global-ELO-Scramble", "Global-ELO-Flash",
+    "WR-ELO", "WR-ELO-Qualies", "WR-ELO-Qualies-Flash",
+    "WR-ELO-Qualies-Onsight", "WR-ELO-Semies", "WR-ELO-Finals",
+    "IFSC-ELO", "IFSC-ELO-Qualies", "IFSC-ELO-Qualies-Flash",
+    "IFSC-ELO-Qualies-Onsight", "IFSC-ELO-Semies", "IFSC-ELO-Finals",
 ]
 DEFAULT_ATHLETES = ["Oscar Baudrand", "Matthew Rodriguez", "Colin Duffy"]
 DISPLAY_OVERRIDES = {
@@ -45,6 +49,10 @@ PALETTE = {
     "blue": "#4285A9",
     "muted": "#71817E",
 }
+ATHLETE_COLORS = [
+    "#0B7A75", "#F26B5B", "#4285A9", "#E6A23C", "#8E5AA7",
+    "#2E8B57", "#D05A8A", "#6B7C93", "#A66A3F", "#4C9F9A",
+]
 
 
 def transparent(color: str, alpha: float = 0.12) -> str:
@@ -79,6 +87,12 @@ def read_data() -> dict[str, pd.DataFrame]:
         "correlations": ("boulder_rating_correlations.csv", "csv"),
         "calibration": ("boulder_elo_calibration.csv", "csv"),
         "rosters": ("program_rosters.csv", "csv"),
+        "physical_profiles": ("physical_test_profiles.csv", "csv"),
+        "physical_associations": ("physical_test_associations.csv", "csv"),
+        "physical_models": ("physical_model_summary.csv", "csv"),
+        "model_backtest": ("model_backtest_summary.csv", "csv"),
+        "sensitivity_metrics": ("latent_volatility_challenger_metrics.csv", "csv"),
+        "sensitivity_status": ("latent_volatility_challenger_status.csv", "csv"),
     }
     output: dict[str, pd.DataFrame] = {}
     for key, (filename, kind) in files.items():
@@ -310,23 +324,28 @@ def rating_help() -> str:
 
 
 def rating_transform_controls(key: str, default: str) -> str:
-    columns = st.columns([1.55, 1])
+    columns = st.columns([1.3, 1, 1])
     family = columns[0].segmented_control(
         "Rating evidence", RATING_ORDER, default=default,
         help=rating_help(), key=f"{key}_family",
     )
-    format_name = columns[1].selectbox(
-        "Round format", FORMAT_OPTIONS, index=0,
-        disabled=family != "Global-ELO",
-        help=(
-            "Format-specific ratings are available for the Global evidence pool. "
-            "IFSC and WR transformations already describe a narrower event pool."
-        ),
-        key=f"{key}_format",
+    round_name = columns[1].selectbox(
+        "Round evidence", ROUND_OPTIONS, index=0, key=f"{key}_round",
+        help="Use all eligible rounds, or isolate qualification, semifinal or final evidence.",
     )
-    if family == "Global-ELO" and format_name != "All formats":
-        return f"Global-ELO-{format_name}"
-    return family
+    procedure = columns[2].selectbox(
+        "Qualification procedure", QUALIFICATION_FORMATS, index=0,
+        disabled=round_name != "Qualification", key=f"{key}_procedure",
+        help="Flash includes shared beta/video rounds; Onsight keeps athletes isolated from other attempts.",
+    )
+    suffix = {
+        "All rounds": "", "Qualification": "-Qualies",
+        "Semi-final": "-Semies", "Final": "-Finals",
+    }[round_name]
+    rating = f"{family}{suffix}"
+    if round_name == "Qualification" and procedure != "Flash + Onsight":
+        rating = f"{rating}-{procedure}"
+    return rating
 
 
 def correlation_note(
@@ -343,9 +362,9 @@ def correlation_note(
     value = float(np.average(rows["spearman_correlation"], weights=rows["athletes"]))
     n = int(rows["athletes"].sum())
     return (
-        f"Rank correlation with WR-ELO: {value:.2f} across {n} paired athlete-pools. "
-        "This shows association, not why the ratings differ; setting specificity, "
-        "training environment, attendance, travel and selection remain mixed together."
+        f"Relationship with WR-ELO: {value:.2f} (rank correlation), using {n} athletes "
+        "who have both ratings. A value near 1 means the two ratings order athletes "
+        "similarly. It does not tell us why an athlete differs between them."
     )
 
 
@@ -364,18 +383,21 @@ def add_selected_highlight(
     focus = focus.sort_values("_selection_order")
     offsets = [(-58, -34), (-68, 18), (-54, 42)]
     for position, (_, row) in enumerate(focus.iterrows()):
+        color = ATHLETE_COLORS[position % len(ATHLETE_COLORS)]
         figure.add_trace(
             go.Scatter(
                 x=[row[x]], y=[row[y]], mode="markers",
                 marker={
                     "size": 14, "color": "rgba(0,0,0,0)",
-                    "line": {"width": 2, "color": "#36524E"},
+                    "line": {"width": 2, "color": color},
                     "symbol": "diamond" if row.get("gender") == "Women" else "circle",
                 },
-                hoverinfo="skip",
-                showlegend=False,
+                hoverinfo="skip", name=friendly_name(row["athlete_name"]),
+                legendgroup="Compared athletes", showlegend=True,
             )
         )
+        if position >= 3:
+            continue
         ax, ay = offsets[position % len(offsets)]
         figure.add_annotation(
             x=row[x], y=row[y], text=friendly_name(row["athlete_name"]),
@@ -426,6 +448,46 @@ def outcome_threshold(
     return float(pool_rows.mean()) if pool_rows.notna().any() else np.nan
 
 
+def outcome_probability(
+    rating: float, calibration: pd.DataFrame, outcome: str,
+    pool: str = "Boulder_All",
+) -> tuple[float, float]:
+    """Return a fitted 2025 outcome probability and McFadden pseudo-R²."""
+
+    if not np.isfinite(rating) or calibration.empty:
+        return np.nan, np.nan
+    rows = calibration.loc[calibration["pool"].eq(pool)]
+    if rows.empty:
+        rows = calibration.loc[calibration["pool"].eq("Boulder_All")]
+    if rows.empty:
+        return np.nan, np.nan
+    row = rows.iloc[0]
+    threshold = pd.to_numeric(pd.Series([
+        row.get(f"display_elo_at_50pct_{outcome}")
+    ]), errors="coerce").iloc[0]
+    slope = pd.to_numeric(pd.Series([
+        row.get(f"{outcome}_logistic_slope_per_100_native_elo")
+    ]), errors="coerce").iloc[0]
+    fit = pd.to_numeric(pd.Series([
+        row.get(f"{outcome}_mcfadden_pseudo_r2")
+    ]), errors="coerce").iloc[0]
+    if not np.isfinite(threshold) or not np.isfinite(slope):
+        return np.nan, float(fit) if np.isfinite(fit) else np.nan
+    linear = np.clip((rating - threshold) / 100.0 * slope, -30, 30)
+    return (
+        float(1 / (1 + np.exp(-linear))),
+        float(fit) if np.isfinite(fit) else np.nan,
+    )
+
+
+def rating_target(family: str) -> str:
+    if "-Finals" in family:
+        return "podium"
+    if "-Semies" in family:
+        return "final"
+    return "semifinal"
+
+
 def add_outcome_thresholds(
     figure: go.Figure, calibration: pd.DataFrame
 ) -> None:
@@ -456,6 +518,10 @@ def pool_scatter(
     canadian_outline: bool = False,
     calibration: pd.DataFrame | None = None,
 ) -> go.Figure:
+    if rating not in frame.columns:
+        return go.Figure().update_layout(
+            title=f"{rating} is not yet available in this data build"
+        )
     plot = frame.dropna(subset=[x, rating]).copy()
     if plot.empty:
         return go.Figure().update_layout(title="No matched ratings for this view")
@@ -582,6 +648,11 @@ def compare_text(
     rating: str,
     context: str = "",
 ) -> str:
+    if rating not in frame.columns:
+        return (
+            f"{rating} is not present in this data build yet. The athlete selection "
+            "is preserved while the specialist family is rebuilt."
+        )
     focus = selected_rows(frame, selected).dropna(subset=[rating]).sort_values(rating, ascending=False)
     if focus.empty:
         return "The selected athletes do not yet have matched evidence in this pool."
@@ -807,26 +878,33 @@ def render_progression(
     add_selected_highlight(figure, plot, selected, "age", "Global-ELO")
 
     show_lines = st.toggle(
-        "Show pathway reference lines",
+        "Show current World top-10 pathway",
         value=True,
         help=(
-            "Shows the mean Global-ELO of current CNR top-five athletes by age "
-            "band. Outcome references remain visible because they define the "
-            "shared 2025 interpretation scale."
+            "Shows how today's World Ranking top 10 were rated at each age. "
+            "An age bin appears only when it contains several athletes."
         ),
     )
     if show_lines:
-        top5 = athletes.loc[athletes["cnr_rank"].le(5)].dropna(subset=["age", "Global-ELO"])
-        if not top5.empty:
-            grouped = (
-                top5.assign(age_year=top5["age"].round())
-                .groupby(["gender", "age_year"], as_index=False)["Global-ELO"]
-                .mean()
-            )
+        top10 = athletes.loc[athletes["world_event_rank"].le(10), ["pool", "global_id"]]
+        pathway = history.merge(top10, on=["pool", "global_id"], how="inner")
+        pathway = pathway.dropna(subset=["age_at_event", "rating_after"]).copy()
+        pathway["age_year"] = (
+            pd.to_numeric(pathway["age_at_event"], errors="coerce") * 2
+        ).round() / 2
+        pathway = pathway.merge(
+            athletes[["pool", "global_id", "gender"]],
+            on=["pool", "global_id"], how="left",
+        )
+        grouped = pathway.groupby(["gender", "age_year"], as_index=False).agg(
+            rating=("rating_after", "mean"), athletes=("global_id", "nunique")
+        )
+        grouped = grouped.loc[grouped["athletes"].ge(3)]
+        if not grouped.empty:
             for gender, gender_rows in grouped.groupby("gender"):
                 figure.add_trace(go.Scatter(
-                    x=gender_rows["age_year"], y=gender_rows["Global-ELO"], mode="lines",
-                    name=f"Current CNR top-five mean — {gender}",
+                    x=gender_rows["age_year"], y=gender_rows["rating"], mode="lines",
+                    name=f"Current WR top-10 history — {gender}",
                     line={
                         "color": PALETTE["teal"] if gender == "Men" else PALETTE["blue"],
                         "width": 3, "dash": "dot",
@@ -847,6 +925,7 @@ def render_progression(
         "the same age and gender. It assumes the trend continues; it is not a "
         "training-effect claim."
     )
+    render_matchup_matrix(athletes, history, selected)
     render_focus_hypotheses(athletes, history, selected, calibration)
     st.caption(correlation_note(correlations, "Global-ELO"))
 
@@ -865,7 +944,7 @@ def progression_projection(
     history = history.copy()
     history["event_date"] = pd.to_datetime(history["event_date"], errors="coerce")
     age_rates = typical_age_progression(history)
-    colors = [PALETTE["teal"], PALETTE["coral"], PALETTE["blue"]]
+    colors = [ATHLETE_COLORS[index % len(ATHLETE_COLORS)] for index in range(len(focus))]
     for color, (_, athlete) in zip(colors, focus.iterrows()):
         rows = history.loc[
             history["global_id"].eq(athlete["global_id"])
@@ -948,6 +1027,54 @@ def typical_age_progression(history: pd.DataFrame) -> dict[tuple[str, int], floa
     }
 
 
+def render_matchup_matrix(
+    athletes: pd.DataFrame, history: pd.DataFrame, selected: list[str]
+) -> None:
+    """Pairwise Elo ordering now and under the same bounded 12-month hypothesis."""
+
+    focus = selected_rows(athletes, selected).dropna(subset=["Global-ELO"]).copy()
+    if focus.empty or len(focus) < 2:
+        return
+    focus["selection_order"] = focus["name_key"].map({
+        plain_key(name): index for index, name in enumerate(selected)
+    })
+    focus = focus.sort_values("selection_order").head(12)
+    age_rates = typical_age_progression(history)
+    projected = {}
+    for _, athlete in focus.iterrows():
+        age_year = int(round(athlete["age"])) if pd.notna(athlete.get("age")) else -1
+        typical = age_rates.get((athlete.get("pool"), age_year), 0.0)
+        rate = float(np.clip(
+            0.65 * float(np.clip(athlete.get("momentum", 0.0), -150, 150))
+            + 0.35 * typical, -150, 150,
+        ))
+        projected[(athlete["pool"], athlete["global_id"])] = float(athlete["Global-ELO"]) + rate
+    labels = [friendly_name(name) for name in focus["athlete_name"]]
+    matrix = []
+    for _, row in focus.iterrows():
+        cells = []
+        for _, opponent in focus.iterrows():
+            if row["global_id"] == opponent["global_id"] and row["pool"] == opponent["pool"]:
+                cells.append("—")
+            elif row["pool"] != opponent["pool"]:
+                cells.append("Different pool")
+            else:
+                now = 1 / (1 + 10 ** ((opponent["Global-ELO"] - row["Global-ELO"]) / 400))
+                future = 1 / (1 + 10 ** ((
+                    projected[(opponent["pool"], opponent["global_id"])]
+                    - projected[(row["pool"], row["global_id"])]
+                ) / 400))
+                cells.append(f"{now:.0%} → {future:.0%}")
+        matrix.append(cells)
+    table = pd.DataFrame(matrix, columns=labels, index=labels)
+    st.markdown("#### Pairwise rating comparison")
+    st.caption(
+        "Each cell is the row athlete's Elo-expected chance of placing ahead: now → "
+        "the 12-month bounded-trend hypothesis. This is not a full competition simulation."
+    )
+    st.dataframe(table, width="stretch")
+
+
 def render_focus_hypotheses(
     athletes: pd.DataFrame,
     history: pd.DataFrame,
@@ -955,24 +1082,41 @@ def render_focus_hypotheses(
     calibration: pd.DataFrame,
 ) -> None:
     focus = selected_rows(athletes, selected)
-    rows = []
+    cards = []
     for _, athlete in focus.iterrows():
         global_elo = athlete.get("Global-ELO", np.nan)
+        wr_elo = athlete.get("WR-ELO", np.nan)
         semi = outcome_threshold(calibration, "semifinal", athlete.get("pool"))
         wr_starts = athlete.get("starts_365", np.nan)
         momentum = athlete.get("momentum", 0.0)
         if pd.isna(global_elo):
             hypothesis = "Build a reliable competition baseline before choosing a pathway emphasis."
+        elif np.isfinite(wr_elo) and global_elo - wr_elo >= 100:
+            hypothesis = (
+                "General performance is ahead of World-Ranking-specific performance. "
+                "Prioritize WR-style simulations and selective WR starts; review onsight "
+                "decision quality, setting specificity, travel and pressure response."
+            )
         elif np.isfinite(semi) and global_elo >= semi - 100 and (pd.isna(wr_starts) or wr_starts < 3):
             hypothesis = "Test targeted WR competition exposure; readiness appears close enough for the experience to be informative."
         elif momentum > 35:
             hypothesis = "Protect the improving training process; add WR starts selectively rather than chasing participation volume."
         else:
             hypothesis = "Prioritize raising repeatable performance; choose competitions that answer a specific readiness question."
-        rows.append({"Athlete": friendly_name(athlete["athlete_name"]), "Working hypothesis": hypothesis})
-    if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        st.caption("These are transparent decision hypotheses from rating level, recent change and WR exposure—not causal training prescriptions.")
+        cards.append((friendly_name(athlete["athlete_name"]), hypothesis))
+    if cards:
+        st.markdown("#### Working hypotheses")
+        for start in range(0, len(cards), 3):
+            columns = st.columns(min(3, len(cards) - start))
+            for column, (name, hypothesis) in zip(columns, cards[start:start + 3]):
+                with column.container(border=True):
+                    st.markdown(f"**{name}**")
+                    st.write(hypothesis)
+        st.caption(
+            "These are decision hypotheses from rating level, recent change and WR "
+            "exposure—not causal training prescriptions. More starts can reveal a "
+            "rating more clearly, but the current data do not prove that starts cause improvement."
+        )
 
 
 def render_olympics(
@@ -1062,71 +1206,108 @@ def top_ribbon(
             selected = st.multiselect(
                 f"{mode} athletes",
                 names,
-                default=matched[:12],
-                help="Choose up to the athletes you need; the three first selections receive the strongest visual emphasis.",
+                default=matched,
+                help="All matched members start selected. Uncheck any athlete to simplify an individual graph.",
             )
             if mode == "Canadian National Team proxy":
                 st.caption("Proxy only: current CNR top 15 by gender. Replace with the official roster when supplied.")
-        return selected[:3], discipline
+        return selected, discipline
 
 
 def render_rating_detail(
     athletes: pd.DataFrame,
     history: pd.DataFrame,
     selected: list[str],
+    calibration: pd.DataFrame,
 ) -> None:
-    with st.expander("Compared athletes · all rating evidence"):
-        focus = selected_rows(athletes, selected)
-        if focus.empty:
-            st.caption("No matched rating evidence.")
-            return
-        tabs = st.tabs([friendly_name(row["athlete_name"]) for _, row in focus.iterrows()])
-        for tab, (_, athlete) in zip(tabs, focus.iterrows()):
-            with tab:
-                metrics = st.columns(3)
-                for column, family in zip(metrics, RATING_ORDER):
-                    value = athlete.get(family, np.nan)
-                    column.metric(family, f"{value:.0f}" if pd.notna(value) else "—")
-                detail = pd.DataFrame([
-                    {
-                        "Rating family": family,
-                        "Elo": athlete.get(family),
-                        "Eligible contests": athlete.get(f"{family} evidence"),
-                    }
-                    for family in ALL_RATINGS
-                ])
-                st.dataframe(
-                    detail.style.format(
-                        {"Elo": "{:.0f}", "Eligible contests": "{:.0f}"},
-                        na_rep="—",
-                    ),
-                    hide_index=True,
-                    width="stretch",
-                )
-                st.caption(
-                    "Missing Elo means the minimum evidence rule was not met. "
-                    "Eligible contests describes evidence quantity, not athlete quality."
-                )
-                rounds = history.loc[
-                    history["global_id"].eq(athlete["global_id"])
-                    & history["pool"].eq(athlete["pool"])
-                ].sort_values("event_date", ascending=False).head(5)
-                if not rounds.empty:
-                    latest = rounds[[
-                        "event_date", "event_name", "round_group",
-                        "confirmed_procedure", "performance_elo",
-                    ]].rename(columns={
-                        "event_date": "Event date", "event_name": "Competition",
-                        "round_group": "Round",
-                        "confirmed_procedure": "Procedure",
-                        "performance_elo": "Performance-ELO",
-                    })
-                    st.markdown("**Latest isolated round performances**")
-                    st.dataframe(
-                        latest.style.format({"Performance-ELO": "{:.0f}"}, na_rep="—"),
-                        hide_index=True,
-                        width="stretch",
-                    )
+    st.subheader("Compared athletes · all rating evidence")
+    focus = selected_rows(athletes, selected)
+    if focus.empty:
+        st.caption("No matched rating evidence. Athletes with no competition yet remain in the roster.")
+        return
+    focus["selection_order"] = focus["name_key"].map({
+        plain_key(name): index for index, name in enumerate(selected)
+    })
+    focus = focus.sort_values("selection_order")
+    rows = []
+    for athlete_index, (_, athlete) in enumerate(focus.iterrows()):
+        for family in ALL_RATINGS:
+            value = pd.to_numeric(pd.Series([athlete.get(family)]), errors="coerce").iloc[0]
+            if not np.isfinite(value):
+                continue
+            target = rating_target(family)
+            probability, fit = outcome_probability(
+                value, calibration, target, athlete.get("pool", "Boulder_All")
+            )
+            target_label = {
+                "semifinal": "Make semifinal", "final": "Make final",
+                "podium": "Make podium",
+            }[target]
+            estimate = "Not enough validation data"
+            if np.isfinite(probability):
+                estimate = f"{target_label}: {probability:.0%}"
+                if np.isfinite(fit):
+                    estimate += f" (fit {fit:.0%})"
+            rows.append({
+                "Athlete": friendly_name(athlete["athlete_name"]),
+                "Rating family": family,
+                "Elo": round(float(value)),
+                "Included rounds": athlete.get(f"{family} evidence"),
+                "Historical outcome estimate": estimate,
+            })
+    detail = pd.DataFrame(rows)
+    if detail.empty:
+        st.info("These athletes are kept in the roster but do not yet have competition evidence.")
+        return
+    legend = " · ".join(
+        f"<span style='color:{ATHLETE_COLORS[i % len(ATHLETE_COLORS)]}'>●</span> {friendly_name(name)}"
+        for i, name in enumerate(selected)
+        if plain_key(name) in set(focus["name_key"])
+    )
+    st.markdown(legend, unsafe_allow_html=True)
+    st.dataframe(
+        detail,
+        hide_index=True,
+        width="stretch",
+        height=min(720, 38 * len(detail) + 40),
+        column_config={
+            "Elo": st.column_config.NumberColumn(format="%d"),
+            "Included rounds": st.column_config.NumberColumn(format="%d"),
+            "Historical outcome estimate": st.column_config.TextColumn(width="large"),
+        },
+    )
+    st.caption(
+        "Fit is McFadden pseudo-R² for the 2025 outcome curve: how much Elo improves "
+        "that outcome model over using only the average success rate. It is not the "
+        "athlete's certainty and it is not ordinary R²."
+    )
+    if not history.empty:
+        ids = focus[["pool", "global_id", "athlete_name"]]
+        recent = history.merge(ids, on=["pool", "global_id"], how="inner", suffixes=("", "_selected"))
+        recent["event_date"] = pd.to_datetime(recent["event_date"], errors="coerce")
+        recent = (
+            recent.sort_values("event_date", ascending=False)
+            .groupby(["pool", "global_id"], as_index=False, group_keys=False)
+            .head(3)
+        )
+        if not recent.empty:
+            recent["Athlete"] = recent["athlete_name_selected"].map(friendly_name)
+            latest = recent[[
+                "Athlete", "event_date", "event_name", "round_group",
+                "confirmed_procedure", "performance_elo",
+            ]].rename(columns={
+                "event_date": "Event date", "event_name": "Competition",
+                "round_group": "Round", "confirmed_procedure": "Procedure",
+                "performance_elo": "Performance-ELO",
+            })
+            st.markdown("#### Latest isolated round performances")
+            st.dataframe(
+                latest, hide_index=True, width="stretch",
+                column_config={
+                    "Event date": st.column_config.DateColumn(format="YYYY-MM-DD"),
+                    "Performance-ELO": st.column_config.NumberColumn(format="%d"),
+                },
+            )
 
 
 def startup_status(data: dict[str, pd.DataFrame]) -> None:
@@ -1157,7 +1338,180 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
                     f"from {starts:,} pre-event athlete-starts across {events} "
                     "gender-pool World Cup samples in 2025."
                 )
-        st.caption("Duplicate controls run before the rating build. Missing specialist evidence is withheld rather than silently replaced.")
+        st.caption("Specialist ratings appear only when the athlete has enough matching round evidence.")
+
+
+def render_physical_strength(
+    athletes: pd.DataFrame, selected: list[str], data: dict[str, pd.DataFrame]
+) -> None:
+    st.header("Physical Strength")
+    st.caption(
+        "What testing and self-reported climbing grades explain about current Boulder "
+        "ratings. Associations describe shared patterns; they do not prove that changing "
+        "one test causes Elo to change."
+    )
+    profiles = data.get("physical_profiles", pd.DataFrame())
+    associations = data.get("physical_associations", pd.DataFrame())
+    models = data.get("physical_models", pd.DataFrame())
+    if profiles.empty:
+        st.info(
+            "The governed physical-testing artifact is being rebuilt. Athlete names remain "
+            "available even when they have no test or competition evidence yet."
+        )
+        return
+    profiles = profiles.copy()
+    profiles["name_key"] = profiles["athlete_name"].map(plain_key)
+    rating_columns = [
+        "pool", "name_key", "Global-ELO", "IFSC-ELO", "WR-ELO",
+        "gender", "age",
+    ]
+    athlete_ratings = athletes[[
+        column for column in rating_columns + ["Global-ELO evidence"]
+        if column in athletes
+    ]].copy()
+    athlete_ratings = athlete_ratings.sort_values(
+        "Global-ELO evidence" if "Global-ELO evidence" in athlete_ratings else "Global-ELO",
+        ascending=False,
+    ).drop_duplicates(["pool", "name_key"])
+    profiles = profiles.merge(
+        athlete_ratings,
+        on=["pool", "name_key"], how="left",
+    )
+    tests = {
+        "Self-reported 50% flash grade": "boulder_grade_50pct_flash_v",
+        "Self-reported max grade in ≤3 physical sends (last 3 months)":
+            "boulder_grade_3x_physical_sends_last_3_months_v",
+    }
+    test = st.selectbox("Test or self-reported grade", list(tests))
+    value_column = tests[test]
+    rating_candidates = [family for family in RATING_ORDER if family in profiles]
+    rating = st.selectbox("Rating to explain", rating_candidates or ["Global-ELO"])
+    plot = profiles.copy()
+    if rating in plot and value_column in plot:
+        plot[value_column] = pd.to_numeric(plot[value_column], errors="coerce")
+        plot[rating] = pd.to_numeric(plot[rating], errors="coerce")
+        plot = plot.dropna(subset=[value_column, rating])
+        figure = px.scatter(
+            plot, x=value_column, y=rating, hover_name="athlete_name",
+            color="gender" if "gender" in plot else None,
+            trendline=None,
+            title=f"{test} and {rating}",
+        )
+        figure.update_traces(marker={"size": 10, "opacity": 0.68})
+        focus = plot.loc[plot["name_key"].isin({plain_key(name) for name in selected})]
+        for index, (_, row) in enumerate(focus.iterrows()):
+            figure.add_trace(go.Scatter(
+                x=[row[value_column]], y=[row[rating]], mode="markers+text",
+                text=[friendly_name(row["athlete_name"])], textposition="top center",
+                marker={"size": 15, "color": ATHLETE_COLORS[index % len(ATHLETE_COLORS)],
+                        "line": {"width": 2, "color": PALETTE["ink"]}},
+                name=friendly_name(row["athlete_name"]),
+            ))
+        figure.update_layout(height=540)
+        st.plotly_chart(figure, width="stretch", theme=None)
+        st.caption(
+            f"{len(plot)} linked athletes are visible for this exact grade × rating pair. "
+            "Grade values are converted to the common V-scale used in the testing source."
+        )
+    if not associations.empty:
+        shown = associations.copy()
+        grade_label = (
+            "Boulder Grade 50% Flash" if value_column == "boulder_grade_50pct_flash_v"
+            else "Boulder Grade 3x physical sends last 3 months"
+        )
+        shown = shown.loc[shown["grade_metric"].eq(grade_label)]
+        elo_label = {
+            "Global-ELO": "Current Global quality Elo",
+            "IFSC-ELO": "Current production IFSC Elo",
+            "WR-ELO": "Current WR Elo",
+        }.get(rating)
+        if elo_label and "elo_metric" in shown:
+            shown = shown.loc[shown["elo_metric"].eq(elo_label)]
+        st.markdown("#### Tested relationships")
+        st.dataframe(shown, hide_index=True, width="stretch")
+    if not models.empty:
+        st.markdown("#### Combined models")
+        st.dataframe(models, hide_index=True, width="stretch")
+        st.caption(
+            "Cross-validated means the model is judged on athletes it did not fit. "
+            "A negative validation R² means the simple average would have predicted better."
+        )
+
+
+def render_maths_behind(
+    athletes: pd.DataFrame, correlations: pd.DataFrame, calibration: pd.DataFrame,
+    data: dict[str, pd.DataFrame],
+) -> None:
+    st.header("Maths behind")
+    st.caption("What each model is for, what it can predict, and where it can fail.")
+    comparison = pd.DataFrame([
+        {
+            "Model": "Global-ELO", "Best use": "Overall Open World-Cup readiness",
+            "Evidence": "Local, national, youth and international rounds",
+            "Strength": "Fast learning for athletes with little IFSC exposure",
+            "Main caveat": "Local terrain and field strength must transport correctly",
+        },
+        {
+            "Model": "IFSC-ELO", "Best use": "IFSC-specific readiness",
+            "Evidence": "Non-para IFSC rounds",
+            "Strength": "Closer competition environment and setting",
+            "Main caveat": "Can lag for new or transformed athletes",
+        },
+        {
+            "Model": "WR-ELO", "Best use": "World Ranking event performance",
+            "Evidence": "Only WR-point events",
+            "Strength": "Most specific to ranking access",
+            "Main caveat": "Sparse and participation-selected evidence",
+        },
+        {
+            "Model": "Performance-ELO", "Best use": "Describe one round",
+            "Evidence": "One frozen pre-event field and observed result",
+            "Strength": "Makes surprise and momentum visible",
+            "Main caveat": "One round also contains terrain fit and ordinary noise",
+        },
+    ])
+    st.dataframe(comparison, hide_index=True, width="stretch")
+    backtest = data.get("model_backtest", pd.DataFrame())
+    if not backtest.empty:
+        st.markdown("#### Frozen next-competition backtest")
+        st.dataframe(backtest, hide_index=True, width="stretch")
+        st.caption(
+            "Frozen means every prediction uses only information available before that "
+            "competition. Higher rank correlation is better; lower log-loss and Brier "
+            "error are better. This is the promotion test, not post-event fit."
+        )
+    sensitivity = data.get("sensitivity_metrics", pd.DataFrame())
+    if not sensitivity.empty:
+        boulder = sensitivity.loc[
+            sensitivity.get("pool", pd.Series("", index=sensitivity.index))
+            .astype(str).str.startswith("Boulder")
+        ]
+        if not boulder.empty:
+            st.markdown("#### Faster-response challenger")
+            st.dataframe(boulder, hide_index=True, width="stretch")
+            st.caption(
+                "The latent-volatility challenger reacts more to persistent Performance-ELO "
+                "surprises. It slightly improved some ordering metrics but failed the "
+                "predeclared probability-error gate, so it is research evidence—not production Elo."
+            )
+    if not calibration.empty:
+        combined = calibration.loc[calibration["pool"].eq("Boulder_All")]
+        shown = combined if not combined.empty else calibration.head(1)
+        columns = [column for column in shown if (
+            column.startswith("display_elo_at_50pct_") or column.endswith("mcfadden_pseudo_r2")
+        )]
+        if columns:
+            st.markdown("#### 2025 outcome calibration")
+            st.dataframe(shown[["pool", *columns]], hide_index=True, width="stretch")
+    st.markdown("#### Why a large Performance-ELO surprise does not get full weight immediately")
+    st.write(
+        "A repeated surprise across independent competitions is stronger evidence of real "
+        "change than several rounds at the same event. The production Elo stays zero-sum "
+        "inside each event and lets uncertainty fall with evidence. A faster current-shape "
+        "layer should be adopted only if it improves frozen next-event probability forecasts, "
+        "not just because it follows the latest result more closely."
+    )
+    st.caption(correlation_note(correlations, "Global-ELO"))
 
 
 def main() -> None:
@@ -1187,7 +1541,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     st.title("Comp Climbing Projections")
-    st.markdown("### Strength, depth and progression of canadian climbers: from local comps to the Olympics")
+    st.markdown("### Level, depth, physicality and progression of Canadian climbers: from local comps to the Olympics")
     st.caption("Boulder release · model evidence supports coaching and governance judgment; it does not replace it.")
 
     data = read_data()
@@ -1200,33 +1554,45 @@ def main() -> None:
     if not selected:
         st.info("Select at least one athlete to begin.")
         st.stop()
-    render_rating_detail(athletes, data["history"], selected)
-
-    st.header("Overview")
-    section = st.segmented_control(
-        "Overview section",
-        ["Canadian Pool", "IFSC Pool", "WR Pool", "Global progression", "Towards Olympics"],
-        default="Canadian Pool",
-        label_visibility="collapsed",
+    workspace = st.segmented_control(
+        "Workspace", ["Overview", "Physical Strength", "Maths behind"],
+        default="Overview", label_visibility="collapsed",
     )
-    renderers = {
-        "Canadian Pool": lambda: render_canadian_pool(
-            athletes, selected, data["correlations"], data["calibration"]
-        ),
-        "IFSC Pool": lambda: render_ifsc_pool(
-            athletes, data["history"], selected, data["correlations"],
-            data["calibration"],
-        ),
-        "WR Pool": lambda: render_wr_pool(
-            athletes, selected, data["correlations"], data["calibration"]
-        ),
-        "Global progression": lambda: render_progression(
-            athletes, data["history"], selected, data["correlations"],
-            data["calibration"],
-        ),
-        "Towards Olympics": lambda: render_olympics(athletes, selected, data["correlations"]),
-    }
-    renderers[section]()
+    if workspace == "Overview":
+        render_rating_detail(athletes, data["history"], selected, data["calibration"])
+        st.header("Overview")
+        section = st.segmented_control(
+            "Overview section",
+            ["Canadian Pool", "IFSC Pool", "WR Pool", "Global progression", "Towards Olympics"],
+            default="Canadian Pool",
+            label_visibility="collapsed",
+        )
+        renderers = {
+            "Canadian Pool": lambda: render_canadian_pool(
+                athletes, selected, data["correlations"], data["calibration"]
+            ),
+            "IFSC Pool": lambda: render_ifsc_pool(
+                athletes, data["history"], selected, data["correlations"],
+                data["calibration"],
+            ),
+            "WR Pool": lambda: render_wr_pool(
+                athletes, selected, data["correlations"], data["calibration"]
+            ),
+            "Global progression": lambda: render_progression(
+                athletes, data["history"], selected, data["correlations"],
+                data["calibration"],
+            ),
+            "Towards Olympics": lambda: render_olympics(
+                athletes, selected, data["correlations"]
+            ),
+        }
+        renderers[section]()
+    elif workspace == "Physical Strength":
+        render_physical_strength(athletes, selected, data)
+    else:
+        render_maths_behind(
+            athletes, data["correlations"], data["calibration"], data
+        )
 
     with st.expander("Rating glossary and model contract"):
         st.write(rating_help())
