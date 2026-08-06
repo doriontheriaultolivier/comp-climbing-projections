@@ -16,8 +16,8 @@ stays available as a frozen comparison and rollback release.
 - **Canadian Pool:** where every matched CNR athlete sits on Global, IFSC and
   World Ranking evidence, with recent movement and data recency.
 - **IFSC Pool:** Canadians beside every 2025–2026 IFSC Boulder finalist.
-- **WR Pool:** the current top 40 and every current Canadian participant,
-  including country comparisons.
+- **WC+ / CUWR Pool:** the current reconstructed top 40, World Cups/Series and
+  harder-event evidence, country entry levels and Olympic-cycle comparisons.
 - **Global progression:** same-age pathway comparisons, empirical reference
   lines and a clearly labelled bounded-trend hypothesis.
 - **Towards Olympics:** a compact view of readiness, World Ranking access and
@@ -58,8 +58,11 @@ The current machine contract is [schema v2](schemas/boulder_style_tag_schema_v2.
 `Global-ELO` uses every de-duplicated local, national, international, youth
 and senior Boulder round on one Open World-Cup-readiness scale. Confirmed
 Onsight, Scramble and Flash rounds have specialist Global ratings. `IFSC-ELO`
-uses non-para IFSC results; `WR-ELO` uses events in the current IFSC World
-Ranking window. Both provide Qualies, Semies and Finals specialists.
+uses non-para IFSC results; `WC+-ELO` uses World Cups/World Climbing Series,
+World Championships (including Youth), Olympic qualification events and the
+Olympics. The three main families include youth; `Global-ELO-Open`,
+`IFSC-ELO-Open` and `WC+-ELO-Open` exclude youth. Round specialists provide
+Qualies, Semies and Finals views.
 `Performance-ELO` is one round's isolated level, never a stable athlete rating.
 
 All displayed families share an intuitive anchor: **2000 is the fitted 50%
@@ -69,7 +72,7 @@ for the men's and women's pools. The translation does not change athlete order,
 spacing or historical updates.
 
 Specialists require at least two eligible contests and shrink toward
-`Global-ELO` while evidence is limited. Correlations with `WR-ELO` are
+`Global-ELO` while evidence is limited. Correlations with `WC+-ELO` are
 descriptive and cannot isolate setting, training environment, attendance,
 travel or selection effects. See
 [the full contract](docs/BOULDER_RATING_FAMILY_CONTRACT.md).

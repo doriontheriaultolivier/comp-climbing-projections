@@ -14,6 +14,7 @@ from comp_climbing_app import (
     plain_key,
     rating_radar_figure,
     read_data,
+    selected_rows,
 )
 
 
@@ -54,7 +55,7 @@ class AppSmokeTests(unittest.TestCase):
         ).select("Onsight").run(timeout=120)
         self.assertFalse(app.exception)
 
-        for section in ["IFSC Pool", "WR Pool"]:
+        for section in ["IFSC Pool", "WC+ / CUWR Pool"]:
             overview = next(
                 item for item in app.segmented_control
                 if item.label == "Overview section"
@@ -166,6 +167,42 @@ class AppSmokeTests(unittest.TestCase):
         self.assertLessEqual(figure.layout.polar.radialaxis.range[0], 2000)
         self.assertGreaterEqual(figure.layout.polar.radialaxis.range[1], 2000)
 
+    def test_rating_radars_share_axes_and_wc_plus_reports_delta(self) -> None:
+        rows = []
+        for family, rating in {
+            "Global-ELO": 2000, "Global-ELO-Qualies": 2010,
+            "Global-ELO-Semies": 2020, "Global-ELO-Finals": 2030,
+            "WC+-ELO": 1975, "WC+-ELO-Qualies": 1995,
+            "WC+-ELO-Semies": 2005, "WC+-ELO-Finals": 2015,
+        }.items():
+            rows.append({
+                "Athlete": "Oscar Baudrand", "Rating family": family,
+                "Elo": rating, "Included rounds": 8,
+                "Historical outcome estimate": "Reference",
+            })
+        detail = pd.DataFrame(rows)
+        all_comp = rating_radar_figure(
+            detail, ["Oscar Baudrand"], "All-competition profile"
+        )
+        wc_plus = rating_radar_figure(
+            detail, ["Oscar Baudrand"], "World-circuit profile"
+        )
+        self.assertEqual(
+            list(all_comp.layout.polar.radialaxis.range),
+            list(wc_plus.layout.polar.radialaxis.range),
+        )
+        self.assertIn("Change from all competitions", wc_plus.data[1].hovertemplate)
+        self.assertIn("-25 Elo", [row[3] for row in wc_plus.data[1].customdata])
+
+    def test_selected_rows_uses_global_id_not_duplicate_display_name(self) -> None:
+        frame = pd.DataFrame({
+            "global_id": ["IFSC:1629", "USAC:999"],
+            "name_key": [plain_key("Madison Richardson")] * 2,
+            "athlete_name": ["Madison Richardson"] * 2,
+        })
+        chosen = selected_rows(frame, ["IFSC:1629"])
+        self.assertEqual(chosen["global_id"].tolist(), ["IFSC:1629"])
+
     def test_governed_boulder_count_exposes_conflict(self) -> None:
         rows = pd.DataFrame({
             "boulder_count": [4, 5],
@@ -268,7 +305,7 @@ class AppSmokeTests(unittest.TestCase):
         latest["name_key"] = latest["athlete_name"].map(plain_key)
         evidence_columns = [
             column for column in [
-                "Global-ELO evidence", "IFSC-ELO evidence", "WR-ELO evidence"
+                "Global-ELO evidence", "IFSC-ELO evidence", "WC+-ELO evidence"
             ] if column in data["athletes"]
         ]
         lookup = (

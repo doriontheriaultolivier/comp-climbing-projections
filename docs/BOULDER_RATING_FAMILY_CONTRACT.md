@@ -37,12 +37,15 @@ cutoffs. The app labels them with “2025” for this reason.
 | Display name | Eligible evidence |
 |---|---|
 | Global-ELO | All de-duplicated local, national, international, youth and senior Boulder rounds |
+| Global-ELO-Open | Global evidence restricted to Senior/Open rounds |
 | Global-ELO-Onsight | Global rounds with confirmed onsight procedure |
 | Global-ELO-Scramble | Global rounds with confirmed scramble/redpoint procedure |
 | Global-ELO-Flash | Global rounds with confirmed flash procedure, including all youth qualifications |
-| WR-ELO | Rounds in events currently included in the IFSC World Ranking calculation |
-| WR-ELO-Qualies / Semies / Finals | Only that round family inside WR events |
+| WC+-ELO | World Cups/World Climbing Series, World Championships (including Youth), Olympic qualification events and Olympics |
+| WC+-ELO-Open | WC+ evidence restricted to Senior/Open rounds |
+| WC+-ELO-Qualies / Semies / Finals | Only that round family inside WC+ events |
 | IFSC-ELO | All non-paraclimbing IFSC Boulder rounds in the archive |
+| IFSC-ELO-Open | IFSC evidence restricted to Senior/Open rounds |
 | IFSC-ELO-Qualies / Semies / Finals | Only that round family inside the IFSC archive |
 | Performance-ELO | The isolated level shown by one round using ratings frozen before that competition |
 
@@ -57,7 +60,7 @@ procedure specialist.
 Raw specialist ledgers start at the same mathematical origin as Global-ELO,
 then map directly onto the current Global scale within each competition pool
 using `Global = intercept + slope × raw specialist`. The previous inverse
-regression compressed sparse WR ledgers and produced an artificial downward
+regression compressed sparse specialist ledgers and produced an artificial downward
 shift, especially in the women's pool. Direct mapping removes that pool-level
 bias. The
 displayed specialist difference from Global-ELO is proportional to eligible
@@ -74,14 +77,14 @@ evidence, not the quality of the athlete.
 
 A specialist family is also withheld when fewer than 20 athletes with at least
 three eligible contests can calibrate its raw ledger onto the Global scale.
-This currently affects Global-ELO-Scramble and WR-ELO-Finals. Showing their raw
+This currently affects Global-ELO-Scramble and sparse WC+ specialists. Showing their raw
 1500-centred values would recreate an artificial 100+ point location penalty;
 missing is more honest until a governed hierarchical calibration is tested.
 
 ## What correlations can and cannot say
 
 The Overview reports a rank correlation between each rating family and
-WR-ELO. A larger value means the ordering is more similar to the WR ordering.
+WC+-ELO. A larger value means the ordering is more similar to the WC+ ordering.
 It does **not** identify a causal setting or training-environment effect.
 Attendance, event access, travel, selection, age, field strength and training
 environment remain mixed in the comparison. Any claim about setting
