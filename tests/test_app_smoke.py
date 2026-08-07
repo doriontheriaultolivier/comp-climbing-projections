@@ -73,6 +73,9 @@ class AppSmokeTests(unittest.TestCase):
         workspace.set_value("Maths behind").run(timeout=120)
         self.assertFalse(app.exception)
         self.assertIn("Maths behind", [item.value for item in app.header])
+        page_text = " ".join(item.value for item in app.markdown)
+        self.assertIn("Does Performance-ELO count one round too many times?", page_text)
+        self.assertIn("Does the model work for the athletes we actually support?", page_text)
 
         workspace = next(
             item for item in app.segmented_control if item.label == "Workspace"

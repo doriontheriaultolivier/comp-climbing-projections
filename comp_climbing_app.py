@@ -199,6 +199,7 @@ def read_data() -> dict[str, pd.DataFrame]:
         "cuwr_history": ("cuwr_top40_history.csv", "csv"),
         "context_benchmarks": ("boulder_context_benchmarks.csv", "csv"),
         "prediction_backtest": ("boulder_prediction_backtest_summary.csv", "csv"),
+        "program_backtest": ("boulder_program_backtest_summary.csv", "csv"),
         "rating_v4_backtest": ("boulder_rating_model_v4_backtests.csv", "csv"),
         "pairwise_calibration": ("boulder_pairwise_probability_calibration.csv", "csv"),
     }
@@ -3955,6 +3956,234 @@ def render_prediction_backtest(summary: pd.DataFrame) -> None:
     )
 
 
+def render_performance_elo_dependence_audit(summary: pd.DataFrame) -> None:
+    """Explain and quantify the within-round dependence limitation."""
+
+    st.markdown("#### Does Performance-ELO count one round too many times?")
+    st.write(
+        "One placing creates many beat/lost-to comparisons, but those comparisons are "
+        "connected: the athlete produced one round, not dozens of independent tests. We "
+        "therefore tested a second calculation that treats the entire ordered field as one "
+        "joint ranking. Ties are kept as tied groups."
+    )
+    if summary.empty:
+        st.caption("The dependence comparison is being rebuilt.")
+        return
+    target = summary.loc[
+        summary["comparison_scope"].astype(str).eq(
+            "WC+ next competition · all entrants"
+        )
+        & summary["model"].isin([
+            "Global-ELO + momentum",
+            "Global-ELO + joint-ranking momentum",
+        ])
+    ].copy()
+    if target.empty:
+        st.caption("The dependence comparison is not present in this data release.")
+        return
+    target["Method"] = target["model"].map({
+        "Global-ELO + momentum": "Responsive beat/lost-to posterior (production)",
+        "Global-ELO + joint-ranking momentum": "One joint ranking per round (challenger)",
+    })
+    shown = target.rename(columns={
+        "events": "Competitions",
+        "athlete_starts": "Athlete-starts",
+        "mean_rank_correlation": "Field-order agreement",
+        "pairwise_accuracy": "Head-to-head accuracy",
+        "top8_brier": "Top-8 probability error",
+        "winner_log_loss": "Winner probability error",
+        "momentum_gain": "Tuned momentum weight",
+    })
+    st.dataframe(
+        shown[[
+            "Method", "Competitions", "Athlete-starts", "Field-order agreement",
+            "Head-to-head accuracy", "Top-8 probability error",
+            "Winner probability error", "Tuned momentum weight",
+        ]],
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Field-order agreement": st.column_config.NumberColumn(format="%.3f"),
+            "Head-to-head accuracy": st.column_config.NumberColumn(format="%.3f"),
+            "Top-8 probability error": st.column_config.NumberColumn(format="%.3f"),
+            "Winner probability error": st.column_config.NumberColumn(format="%.3f"),
+            "Tuned momentum weight": st.column_config.NumberColumn(format="%.3f"),
+        },
+    )
+    production = target.loc[target["model"].eq("Global-ELO + momentum")]
+    challenger = target.loc[
+        target["model"].eq("Global-ELO + joint-ranking momentum")
+    ]
+    if len(production) == 1 and len(challenger) == 1:
+        prod = production.iloc[0]
+        joint = challenger.iloc[0]
+        all_three = (
+            float(prod["mean_rank_correlation"]) > float(joint["mean_rank_correlation"])
+            and float(prod["pairwise_accuracy"]) > float(joint["pairwise_accuracy"])
+            and float(prod["top8_brier"]) < float(joint["top8_brier"])
+        )
+        if all_three:
+            st.success(
+                "Decision: keep the responsive posterior in production. The joint-ranking "
+                "challenger is mathematically cleaner about within-round dependence, but it "
+                "was slightly worse on every frozen next-WC+ measure. We do not trade useful "
+                "sensitivity for a theoretical improvement that did not improve prediction."
+            )
+        else:
+            st.warning(
+                "The two methods split the prediction measures. Neither earns an automatic "
+                "promotion; retain both in shadow evaluation on new competitions."
+            )
+    with st.expander("What the improved caveat means · ?"):
+        st.markdown(
+            "- **What is reliable:** the posterior mean is a responsive description of the "
+            "WC-level performance implied by whom the athlete beat and lost to.\n"
+            "- **What is overstated:** its displayed SD conditions on one-dimensional Elo, "
+            "fixed opponent ratings and the composite pair likelihood. It is **not** a "
+            "calibrated 90% or 95% interval for the athlete's true ability.\n"
+            "- **What the challenger fixes:** it counts the ordering as one joint ranking and "
+            "handles ties together.\n"
+            "- **What the challenger still assumes:** one latent skill and the "
+            "Plackett–Luce independence-of-irrelevant-alternatives structure. Terrain fit, "
+            "health, tactics and shared event conditions remain outside the likelihood."
+        )
+        st.markdown(
+            "Method reference: [Turner et al., *Modelling rankings in R: the "
+            "PlackettLuce package*](https://arxiv.org/abs/1810.12068)."
+        )
+
+
+def render_program_backtest(summary: pd.DataFrame) -> None:
+    """Show frozen forecast quality for the current EEQ and CNR top-15 cohorts."""
+
+    st.markdown("#### Does the model work for the athletes we actually support?")
+    if summary.empty:
+        st.caption("The EEQ and Canadian-team cohort checks are being rebuilt.")
+        return
+    cohorts = summary["cohort"].dropna().astype(str).unique().tolist()
+    if not cohorts:
+        return
+    cohort = st.selectbox("Athlete group", cohorts, key="program_backtest_cohort")
+    available_scopes = summary.loc[
+        summary["cohort"].eq(cohort), "scope"
+    ].dropna().astype(str).unique().tolist()
+    preferred = (
+        available_scopes.index("All accessible competitions")
+        if "All accessible competitions" in available_scopes else 0
+    )
+    scope = st.selectbox(
+        "Competitions used for the check",
+        available_scopes,
+        index=preferred,
+        key="program_backtest_scope",
+    )
+    shown = summary.loc[
+        summary["cohort"].eq(cohort) & summary["scope"].eq(scope)
+    ].copy()
+    shown = shown.loc[pd.to_numeric(shown["athlete_starts"], errors="coerce").gt(0)]
+    if shown.empty:
+        st.caption("No eligible starts for this group and competition scope.")
+        return
+    shown["Probability error"] = pd.to_numeric(
+        shown["pairwise_brier"], errors="coerce"
+    )
+    shown["Correct head-to-head order"] = 100 * pd.to_numeric(
+        shown["pairwise_accuracy"], errors="coerce"
+    )
+    shown["Expected-place percentile error"] = 100 * pd.to_numeric(
+        shown["placement_percentile_mae"], errors="coerce"
+    )
+    order = [
+        "Equal-athlete baseline", "Global-ELO",
+        "Global-ELO + joint-ranking momentum",
+        "Global-ELO + pairwise momentum",
+    ]
+    shown["_order"] = shown["model"].map({name: index for index, name in enumerate(order)})
+    shown = shown.sort_values("_order")
+    shown["Chart label"] = shown["model"].map({
+        "Equal-athlete baseline": "Equal baseline",
+        "Global-ELO": "Global-ELO",
+        "Global-ELO + joint-ranking momentum": "+ joint momentum",
+        "Global-ELO + pairwise momentum": "+ responsive momentum",
+    }).fillna(shown["model"])
+    chart = px.bar(
+        shown,
+        x="Probability error",
+        y="Chart label",
+        orientation="h",
+        color="model",
+        color_discrete_map={
+            "Equal-athlete baseline": "#94a3b8",
+            "Global-ELO": "#2563eb",
+            "Global-ELO + joint-ranking momentum": "#f59e0b",
+            "Global-ELO + pairwise momentum": "#0f766e",
+        },
+        hover_data={
+            "athletes": True,
+            "competitions": True,
+            "athlete_starts": True,
+            "opponent_pairs": True,
+            "Correct head-to-head order": ":.1f",
+            "Expected-place percentile error": ":.1f",
+        },
+        title="Head-to-head probability error (lower is better)",
+    )
+    chart.update_layout(
+        height=390,
+        showlegend=False,
+        margin={"l": 145, "r": 20, "t": 65, "b": 50},
+    )
+    chart.update_yaxes(title="")
+    st.plotly_chart(chart, width="stretch", theme=None)
+    table = shown[[
+        "model", "athletes", "competitions", "athlete_starts", "opponent_pairs",
+        "Probability error", "pairwise_brier_ci90_low", "pairwise_brier_ci90_high",
+        "Correct head-to-head order", "Expected-place percentile error",
+        "mean_probability_bias", "evidence_grade",
+    ]].rename(columns={
+        "model": "Model", "athletes": "Athletes", "competitions": "Competitions",
+        "athlete_starts": "Athlete-starts", "opponent_pairs": "Head-to-head cases",
+        "pairwise_brier_ci90_low": "Error 90% low",
+        "pairwise_brier_ci90_high": "Error 90% high",
+        "mean_probability_bias": "Mean probability bias",
+        "evidence_grade": "Evidence coverage",
+    })
+    st.dataframe(
+        table,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "Probability error": st.column_config.NumberColumn(format="%.3f"),
+            "Error 90% low": st.column_config.NumberColumn(format="%.3f"),
+            "Error 90% high": st.column_config.NumberColumn(format="%.3f"),
+            "Correct head-to-head order": st.column_config.NumberColumn(format="%.1f%%"),
+            "Expected-place percentile error": st.column_config.NumberColumn(format="%.1f%%"),
+            "Mean probability bias": st.column_config.NumberColumn(format="%+.3f"),
+        },
+    )
+    best = shown.loc[shown["Probability error"].idxmin()]
+    st.info(
+        f"Best probability forecast in this view: **{best['model']}** "
+        f"(error {best['Probability error']:.3f}; "
+        f"{best['Correct head-to-head order']:.1f}% of head-to-head orders correct)."
+    )
+    st.warning(
+        "Important cohort caveat: this is an honest frozen replay for athletes who are in "
+        "today's group, not a reconstruction of who belonged to the group at the time. EEQ "
+        "uses the 2025-2026 roster. The Canadian National Team view is a transparent proxy—"
+        "today's CNR top 15—not an official historical team list. Selection and survivorship "
+        "therefore affect the cohort; the comparison evaluates forecast usefulness for these "
+        "athletes, not the causal effect of the program."
+    )
+    if scope == "WC+ competitions" and (
+        pd.to_numeric(shown["athlete_starts"], errors="coerce").max() < 40
+    ):
+        st.caption(
+            "WC+ evidence is sparse for this group. Use the result as a directional audit, "
+            "not a selection threshold; the broader competition view is more stable."
+        )
+
+
 def render_maths_behind(
     athletes: pd.DataFrame, correlations: pd.DataFrame, calibration: pd.DataFrame,
     data: dict[str, pd.DataFrame],
@@ -3962,6 +4191,10 @@ def render_maths_behind(
     st.header("Maths behind")
     st.caption("What each model is for, what it can predict, and where it can fail.")
     render_prediction_backtest(data.get("prediction_backtest", pd.DataFrame()))
+    render_performance_elo_dependence_audit(
+        data.get("prediction_backtest", pd.DataFrame())
+    )
+    render_program_backtest(data.get("program_backtest", pd.DataFrame()))
     comparison = pd.DataFrame([
         {
             "Model": "Global-ELO", "Best use": "Overall Open World-Cup readiness",
@@ -3985,7 +4218,7 @@ def render_maths_behind(
             "Model": "Performance-ELO", "Best use": "Describe one round",
             "Evidence": "One frozen pre-event field and observed result",
             "Strength": "Makes surprise and momentum visible",
-            "Main caveat": "One round also contains terrain fit and ordinary noise",
+            "Main caveat": "Responsive composite likelihood; its SD is conditional, not a full ability interval",
         },
     ])
     st.dataframe(comparison, hide_index=True, width="stretch")
@@ -4234,9 +4467,11 @@ def render_maths_behind(
         "still waits for repeated evidence instead of copying one result."
     )
     st.caption(
-        "Technical limit: beat/lost-to pairings from one round are related, not fully "
-        "independent. The posterior mean is useful; its SD is conditional model uncertainty, "
-        "not a complete measure of competition volatility."
+        "Measured limit: beat/lost-to pairings from one round are related rather than fully "
+        "independent. A joint-ranking challenger counted each field once and was slightly less "
+        "accurate on frozen 2025+ WC+ forecasts, so the responsive mean remains in production. "
+        "Its SD is conditional on fixed opponent ratings and a one-dimensional Elo model; do "
+        "not read it as a complete interval for true ability or future result volatility."
     )
     st.caption(correlation_note(correlations, "Global-ELO"))
 

@@ -49,10 +49,19 @@ signal does not feed back as a second cumulative update.
 
 The beat/lost-to terms form a composite likelihood: several pairings come from
 the same round and therefore are not fully independent observations. The mean
-is the requested WC-equivalent summary, but its standard deviation should be
-read as model uncertainty conditional on this approximation, not as a complete
-measure of all competition volatility. A Plackett-Luce ranking likelihood is a
-planned challenger rather than an untested production replacement.
+is the requested responsive WC-equivalent summary. Its standard deviation is
+conditional on this likelihood, fixed opponent ratings and one-dimensional
+Elo; it is not a calibrated interval for true ability or future result
+volatility.
+
+A dependence-aware challenger now treats each ordered field as one generalized
+Plackett-Luce ranking, with equal places handled as tied groups. On the frozen
+2025+ all-entrant WC+ test (45 competitions; 1,831 athlete-starts), responsive
+pairwise momentum was slightly better on field order (0.7992 versus 0.7986),
+head-to-head order (0.8104 versus 0.8091) and Top-8 Brier error (0.1147 versus
+0.1165). Production therefore keeps the responsive composite posterior. The
+joint-ranking result remains a shadow challenger and a bound on how much the
+independence approximation matters in current next-event forecasts.
 
 ## Locked forward comparison
 
@@ -79,6 +88,24 @@ compression. This trade-off is shown rather than concealed. Probability
 temperature is selected on the earlier window for each evaluation domain; it is
 not assumed to be the same as the Elo update scale.
 
+## Current-program cohort audit
+
+The same frozen replay was restricted to athletes in today's program cohorts.
+This answers whether the model is useful for those athletes; it does not claim
+they belonged to the cohort historically.
+
+| Current cohort, all accessible 2025+ competitions | Athletes | Competitions | Starts | Equal-athlete Brier | Global-ELO | + responsive momentum | + joint-ranking momentum |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| EEQ 2025-2026 roster | 54 | 39 | 296 | 0.247 | 0.207 | **0.201** | 0.204 |
+| Canadian team proxy: current CNR top 15 | 29 | 79 | 287 | 0.249 | 0.181 | **0.169** | 0.175 |
+
+Responsive momentum improves probability accuracy for both broad cohorts. The
+EEQ WC+ subset is only eight athlete-starts across four competitions and is
+explicitly graded limited. The Canadian National Team cohort is a transparent
+CNR-top-15 proxy, not an official historical roster. Current membership and
+selection create survivorship bias, so these are descriptive forecast audits,
+not causal evaluations of EEQ or the national program.
+
 ## Known limits
 
 - Context differences mix setting, format, attendance, travel and selection;
@@ -86,7 +113,8 @@ not assumed to be the same as the Elo update scale.
 - A provisional rating remains an estimate with visible uncertainty.
 - Specialist round/format ratings shrink toward Global-ELO when evidence is
   sparse.
-- Performance-ELO uncertainty does not include every source of dependence
-  between pairings from the same round.
+- Performance-ELO uncertainty is conditional: it does not include all
+  within-round dependence, opponent-rating uncertainty, terrain fit, health,
+  tactics or shared event conditions.
 - Model promotion should be revisited when more 2026+ competitions and tagged
   boulder-level evidence are available.
