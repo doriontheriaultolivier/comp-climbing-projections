@@ -191,8 +191,36 @@ class AppSmokeTests(unittest.TestCase):
             list(all_comp.layout.polar.radialaxis.range),
             list(wc_plus.layout.polar.radialaxis.range),
         )
-        self.assertIn("Change from all competitions", wc_plus.data[1].hovertemplate)
-        self.assertIn("-25 Elo", [row[3] for row in wc_plus.data[1].customdata])
+        athlete_trace = next(
+            trace for trace in wc_plus.data if trace.name == "Oscar Baudrand"
+        )
+        self.assertIn("Change from all competitions", athlete_trace.hovertemplate)
+        self.assertIn("-25 Elo", [row[3] for row in athlete_trace.customdata])
+        self.assertTrue(any(
+            "all-competition reference" in str(trace.name)
+            for trace in wc_plus.data
+        ))
+
+    def test_sparse_world_radar_keeps_available_athlete_evidence(self) -> None:
+        detail = pd.DataFrame([
+            {
+                "Athlete": "Matthew Rodriguez", "Rating family": "Global-ELO",
+                "Elo": 1980, "Included rounds": 30,
+                "Historical outcome estimate": "Reference",
+            },
+            {
+                "Athlete": "Matthew Rodriguez", "Rating family": "WC+-ELO",
+                "Elo": 1940, "Included rounds": 2,
+                "Historical outcome estimate": "Make semifinal: 30%",
+            },
+        ])
+        figure = rating_radar_figure(
+            detail, ["Matthew Rodriguez"], "World-circuit profile"
+        )
+        athlete_trace = next(
+            trace for trace in figure.data if trace.name == "Matthew Rodriguez"
+        )
+        self.assertEqual(athlete_trace.r[0], 1940)
 
     def test_selected_rows_uses_global_id_not_duplicate_display_name(self) -> None:
         frame = pd.DataFrame({

@@ -6,3 +6,6 @@ __pycache__/
 .env
 .venv/
 data/boulder_problem_inventory.csv
+# Build/audit sources; the live app uses compact overview artifacts instead.
+data/boulder_global_history.parquet
+data/boulder_rating_families.parquet

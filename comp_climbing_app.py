@@ -199,6 +199,8 @@ def read_data() -> dict[str, pd.DataFrame]:
         "cuwr_history": ("cuwr_top40_history.csv", "csv"),
         "context_benchmarks": ("boulder_context_benchmarks.csv", "csv"),
         "prediction_backtest": ("boulder_prediction_backtest_summary.csv", "csv"),
+        "rating_v4_backtest": ("boulder_rating_model_v4_backtests.csv", "csv"),
+        "pairwise_calibration": ("boulder_pairwise_probability_calibration.csv", "csv"),
     }
     output: dict[str, pd.DataFrame] = {}
     for key, (filename, kind) in files.items():
@@ -247,6 +249,23 @@ def wide_athletes(ratings: pd.DataFrame, history: pd.DataFrame) -> pd.DataFrame:
     athletes = values.merge(evidence, on=index, how="left").merge(
         metadata, on=index, how="left"
     )
+    global_rows = ratings.loc[
+        ratings["rating_family"].eq("Global-ELO")
+    ].drop_duplicates(index, keep="last")
+    target_columns = {
+        "cec_projected_rating": "Canada projection — all evidence",
+        "cec_context_offset": "Canada context adjustment",
+        "rating_uncertainty": "Global-ELO uncertainty",
+        "rating_status": "Global-ELO status",
+    }
+    available_targets = [
+        column for column in target_columns if column in global_rows
+    ]
+    if available_targets:
+        target = global_rows[index + available_targets].rename(
+            columns={column: target_columns[column] for column in available_targets}
+        )
+        athletes = athletes.merge(target, on=index, how="left")
     birth = pd.to_datetime(
         athletes.get("birth_date_analysis_value", athletes.get("birthday")),
         errors="coerce",
@@ -455,8 +474,11 @@ def rating_help() -> str:
         "Youth), Olympic qualification events and the Olympics. Specialist ratings are shown only "
         "with at least two eligible rounds and enough athletes to calibrate the "
         "family; they shrink toward Global-ELO while evidence is limited. "
-        "Performance-ELO is one round's isolated level, not "
-        "the athlete's stable rating."
+        "Performance-ELO is a one-round signal stabilized toward the athlete's "
+        "frozen pre-round Cumulative-ELO. Direct WC+ evidence keeps its full "
+        "signal; lower-level rounds are shrunk more because transfer is less certain. "
+        "Larger, reliable fields also move it more; "
+        "the unshrunk round estimate remains visible in the evidence audit."
     )
 
 
@@ -1999,7 +2021,7 @@ def rating_radar_figure(
         ))
     for athlete_index, athlete in enumerate(athlete_order):
         athlete_rows = visible.loc[visible["Athlete"].eq(athlete)].set_index("Rating family")
-        if len(athlete_rows) < 3:
+        if athlete_rows.empty:
             continue
         ratings: list[float | None] = []
         evidence: list[float] = []
@@ -2042,6 +2064,50 @@ def rating_radar_figure(
                 f"{float(rating - baseline):+.0f} Elo"
                 if np.isfinite(rating) and np.isfinite(baseline) else "—"
             )
+        if not any(value is not None and np.isfinite(value) for value in ratings):
+            continue
+        athlete_color = ATHLETE_COLORS[athlete_index % len(ATHLETE_COLORS)]
+        if view == "World-circuit profile":
+            baseline_ratings: list[float | None] = []
+            for family in families:
+                baseline_family = counterpart.get(family)
+                baseline = np.nan
+                if baseline_family and baseline_family in all_comp_rows.index:
+                    baseline_item = all_comp_rows.loc[baseline_family]
+                    if isinstance(baseline_item, pd.DataFrame):
+                        baseline_item = baseline_item.iloc[0]
+                    baseline = pd.to_numeric(
+                        pd.Series([baseline_item["Elo"]]), errors="coerce"
+                    ).iloc[0]
+                baseline_ratings.append(
+                    float(baseline) if np.isfinite(baseline) else None
+                )
+            if any(value is not None for value in baseline_ratings):
+                figure.add_trace(go.Scatterpolar(
+                    r=[*baseline_ratings, baseline_ratings[0]], theta=closed_labels,
+                    mode="lines+markers",
+                    name=f"{athlete} — all-competition reference",
+                    legendgroup=athlete, showlegend=False,
+                    line={"color": transparent(athlete_color, 0.42), "width": 1.5, "dash": "dot"},
+                    marker={
+                        "color": "white", "size": 7,
+                        "line": {"color": athlete_color, "width": 1.2},
+                    },
+                    hovertemplate=(
+                        f"<b>{athlete}</b><br>%{{theta}}"
+                        "<br>All-competition Elo: %{r:.0f}<extra></extra>"
+                    ),
+                    connectgaps=False,
+                ))
+                for label, baseline, world in zip(labels, baseline_ratings, ratings):
+                    if baseline is None or world is None:
+                        continue
+                    figure.add_trace(go.Scatterpolar(
+                        r=[baseline, world], theta=[label, label], mode="lines",
+                        legendgroup=athlete, showlegend=False,
+                        line={"color": transparent(athlete_color, 0.55), "width": 2},
+                        hoverinfo="skip",
+                    ))
         sizes = [min(17.0, 7.0 + 2.4 * np.log1p(max(value, 0.0))) for value in evidence]
         custom = [
             [families[index], evidence[index], outcomes[index], deltas[index]]
@@ -2050,13 +2116,14 @@ def rating_radar_figure(
         figure.add_trace(go.Scatterpolar(
             r=[*ratings, ratings[0]], theta=closed_labels,
             mode="lines+markers", name=athlete,
-            line={"color": ATHLETE_COLORS[athlete_index % len(ATHLETE_COLORS)], "width": 3},
+            legendgroup=athlete,
+            line={"color": athlete_color, "width": 3},
             marker={
-                "color": ATHLETE_COLORS[athlete_index % len(ATHLETE_COLORS)],
+                "color": athlete_color,
                 "size": [*sizes, sizes[0]], "line": {"color": "white", "width": 1},
             },
             fill="toself", fillcolor=transparent(
-                ATHLETE_COLORS[athlete_index % len(ATHLETE_COLORS)], 0.08
+                athlete_color, 0.08
             ),
             customdata=[*custom, custom[0]],
             hovertemplate=(
@@ -2209,6 +2276,44 @@ def render_rating_detail(
             "Historical outcome estimate": st.column_config.TextColumn(width="large"),
         },
     )
+    target_rows: list[dict[str, object]] = []
+    for _, athlete in focus.iterrows():
+        global_elo = pd.to_numeric(athlete.get("Global-ELO"), errors="coerce")
+        canada = pd.to_numeric(
+            athlete.get("Canada projection — all evidence"), errors="coerce"
+        )
+        target_rows.append({
+            "Athlete": friendly_name(athlete["athlete_name"]),
+            "Open WC projection": global_elo,
+            "Canadian-event projection": canada,
+            "Canada context change": (
+                canada - global_elo
+                if np.isfinite(canada) and np.isfinite(global_elo) else np.nan
+            ),
+            "Current rating status": athlete.get(
+                "Global-ELO status", "Established"
+            ),
+            "Uncertainty (± Elo)": pd.to_numeric(
+                athlete.get("Global-ELO uncertainty"), errors="coerce"
+            ),
+        })
+    target_frame = pd.DataFrame(target_rows)
+    if target_frame["Canadian-event projection"].notna().any():
+        st.markdown("#### Same evidence, different target environment")
+        st.dataframe(
+            target_frame, hide_index=True, width="stretch",
+            column_config={
+                "Open WC projection": st.column_config.NumberColumn(format="%.0f"),
+                "Canadian-event projection": st.column_config.NumberColumn(format="%.0f"),
+                "Canada context change": st.column_config.NumberColumn(format="%+.0f"),
+                "Uncertainty (± Elo)": st.column_config.NumberColumn(format="%.0f"),
+            },
+        )
+        st.caption(
+            "One shared ability estimate is translated to the target environment. The Canada "
+            "adjustment is learned chronologically from Canadian results; it is not a separate "
+            "athlete identity or an extra independent Elo ledger."
+        )
     st.caption(
         "Fit is McFadden pseudo-R² for the 2025 outcome curve: how much Elo improves "
         "that outcome model over using only the average success rate. It is not the "
@@ -2225,20 +2330,25 @@ def render_rating_detail(
         )
         if not recent.empty:
             recent["Athlete"] = recent["athlete_name_selected"].map(friendly_name)
-            latest = recent[[
+            latest_columns = [
                 "Athlete", "event_date", "event_name", "round_group",
                 "confirmed_procedure", "performance_elo",
-            ]].rename(columns={
+            ]
+            if "raw_performance_elo" in recent:
+                latest_columns.append("raw_performance_elo")
+            latest = recent[latest_columns].rename(columns={
                 "event_date": "Event date", "event_name": "Competition",
                 "round_group": "Round", "confirmed_procedure": "Procedure",
                 "performance_elo": "Performance-ELO",
+                "raw_performance_elo": "Raw round estimate",
             })
-            st.markdown("#### Latest isolated round performances")
+            st.markdown("#### Latest round-performance signals")
             st.dataframe(
                 latest, hide_index=True, width="stretch",
                 column_config={
                     "Event date": st.column_config.DateColumn(format="YYYY-MM-DD"),
                     "Performance-ELO": st.column_config.NumberColumn(format="%d"),
+                    "Raw round estimate": st.column_config.NumberColumn(format="%d"),
                 },
             )
         with st.expander("Inspect every competition round behind these ratings"):
@@ -2271,15 +2381,19 @@ def render_rating_detail(
                     shown["source_scope"].eq("IFSC") & wc_plus_event_mask(shown)
                 ]
             shown = shown.sort_values("event_date", ascending=False)
-            shown = shown[[
+            shown_columns = [
                 "event_date", "event_name", "round_group", "confirmed_procedure",
                 "rank_numeric", "n_athletes", "performance_elo", "rating_before",
                 "rating_after", "Global-ELO change",
-            ]].rename(columns={
+            ]
+            if "raw_performance_elo" in shown:
+                shown_columns.insert(7, "raw_performance_elo")
+            shown = shown[shown_columns].rename(columns={
                 "event_date": "Event date", "event_name": "Competition",
                 "round_group": "Round", "confirmed_procedure": "Format",
                 "rank_numeric": "Place", "n_athletes": "Field size",
                 "performance_elo": "Performance-ELO", "rating_before": "Global-ELO before",
+                "raw_performance_elo": "Raw round estimate",
                 "rating_after": "Global-ELO after",
             })
             st.dataframe(
@@ -2288,13 +2402,16 @@ def render_rating_detail(
                     "Event date": st.column_config.DateColumn(format="YYYY-MM-DD"),
                     "Competition": st.column_config.TextColumn(width="large"),
                     "Performance-ELO": st.column_config.NumberColumn(format="%.0f"),
+                    "Raw round estimate": st.column_config.NumberColumn(format="%.0f"),
                     "Global-ELO before": st.column_config.NumberColumn(format="%.0f"),
                     "Global-ELO after": st.column_config.NumberColumn(format="%.0f"),
                     "Global-ELO change": st.column_config.NumberColumn(format="%+.0f"),
                 },
             )
             st.caption(
-                "Performance-ELO describes that isolated round. Global-ELO change is the "
+                "Performance-ELO is the round signal after reliability-weighted shrinkage "
+                "toward the frozen Cumulative-ELO. The raw estimate is retained for audit. "
+                "Global-ELO change is the "
                 "zero-sum update after the round; it is not a claim that one event changed ability."
             )
 
@@ -2355,6 +2472,7 @@ def competition_level_figure(
         "Final": PALETTE["coral"],
     }
     for round_group, rows in athlete_rows.groupby("round_group"):
+        rows = rows.sort_values("event_date").copy()
         field_sizes = rows.get("n_athletes", pd.Series(np.nan, index=rows.index))
         figure.add_trace(go.Scatter(
             x=rows["event_date"], y=rows["performance_elo"], mode="markers",
@@ -2374,6 +2492,22 @@ def competition_level_figure(
                 "<br>Performance-ELO: %{y:.0f}<extra>%{fullData.name}</extra>"
             ),
         ))
+        performances = pd.to_numeric(rows["performance_elo"], errors="coerce")
+        if performances.notna().sum() >= 2:
+            trend = performances.ewm(span=4, adjust=False, min_periods=2).mean()
+            figure.add_trace(go.Scatter(
+                x=rows["event_date"], y=trend, mode="lines",
+                name=f"{round_group} recent-performance trend",
+                line={
+                    "color": round_colors.get(str(round_group), PALETTE["teal"]),
+                    "width": 2, "dash": "dot",
+                },
+                opacity=0.78,
+                hovertemplate=(
+                    f"%{{x|%Y-%m-%d}}<br>Recent weighted {str(round_group).lower()} "
+                    "level: %{y:.0f}<extra></extra>"
+                ),
+            ))
     event_keys = athlete_rows[["source_event_id", "pool", "round_group"]].drop_duplicates()
     field_rows = history.merge(
         event_keys, on=["source_event_id", "pool", "round_group"], how="inner"
@@ -2386,7 +2520,11 @@ def competition_level_figure(
     figure.add_trace(go.Scatter(
         x=field["event_date"], y=field["field_level"], mode="markers",
         name="Median pre-round field Elo",
-        marker={"symbol": "line-ew", "size": 12, "color": "rgba(70,91,88,.48)"},
+        marker={
+            "symbol": "line-ew", "size": 17,
+            "color": "rgba(70,91,88,.72)",
+            "line": {"color": "rgba(70,91,88,.72)", "width": 2.3},
+        },
         customdata=np.column_stack([field["event_name"], field["round_group"], field["field_size"]]),
         hovertemplate=(
             "%{x|%Y-%m-%d}<br>%{customdata[0]} - %{customdata[1]}"
@@ -3994,6 +4132,50 @@ def render_maths_behind(
             "competition. Higher rank correlation is better; lower log-loss and Brier "
             "error are better. This is the promotion test, not post-event fit."
         )
+    v4_backtest = data.get("rating_v4_backtest", pd.DataFrame())
+    if not v4_backtest.empty:
+        model_names = {
+            "quality_a0.50_transfer_0.20": "Former cold-start model",
+            "hier_source_balanced_anchored_e4_sd100": "Current v4 model",
+        }
+        locked = v4_backtest.loc[
+            v4_backtest["model"].isin(model_names)
+            & v4_backtest["evaluation_window"].eq("2025+ locked evaluation")
+            & v4_backtest["evaluation_domain"].isin(
+                ["Open WC+", "CEC national", "CEC provincial / local"]
+            )
+        ].copy()
+        if not locked.empty:
+            locked["Model"] = locked["model"].map(model_names)
+            locked = locked.rename(columns={
+                "evaluation_domain": "Future competition type",
+                "spearman": "Field-order accuracy",
+                "pairwise_brier": "Pairwise probability error",
+                "top_8_brier": "Top-8 probability error",
+                "top_3_brier": "Top-3 probability error",
+            })
+            st.markdown("#### Global-ELO v4: locked 2025+ comparison")
+            st.dataframe(
+                locked[[
+                    "Model", "Future competition type", "Field-order accuracy",
+                    "Pairwise probability error", "Top-8 probability error",
+                    "Top-3 probability error",
+                ]].sort_values(["Future competition type", "Model"]),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "Field-order accuracy": st.column_config.NumberColumn(format="%.3f"),
+                    "Pairwise probability error": st.column_config.NumberColumn(format="%.3f"),
+                    "Top-8 probability error": st.column_config.NumberColumn(format="%.3f"),
+                    "Top-3 probability error": st.column_config.NumberColumn(format="%.3f"),
+                },
+            )
+            st.caption(
+                "Predictions were tuned on 2022–2024 and then frozen for 2025+. "
+                "Higher field-order accuracy is better; lower probability error is better. "
+                "V4 removes cold-start compression and improves domestic/advancement decisions, "
+                "while the former model still orders the middle of WC+ fields slightly better."
+            )
     sensitivity = data.get("sensitivity_metrics", pd.DataFrame())
     if not sensitivity.empty:
         boulder = sensitivity.loc[
@@ -4019,11 +4201,11 @@ def render_maths_behind(
             st.dataframe(shown[["pool", *columns]], hide_index=True, width="stretch")
     st.markdown("#### Why a large Performance-ELO surprise does not get full weight immediately")
     st.write(
-        "A repeated surprise across independent competitions is stronger evidence of real "
-        "change than several rounds at the same event. The production Elo stays zero-sum "
-        "inside each event and lets uncertainty fall with evidence. A faster current-shape "
-        "layer should be adopted only if it improves frozen next-event probability forecasts, "
-        "not just because it follows the latest result more closely."
+        "The displayed Performance-ELO already moves partway from frozen Cumulative-ELO "
+        "toward the raw round estimate; large, reliable fields move it farther. The raw value "
+        "remains in the evidence audit. Repeated surprise across independent competitions is "
+        "stronger evidence of real change than several rounds at one event, so cumulative Elo "
+        "still waits for repeated evidence instead of copying one result."
     )
     st.caption(correlation_note(correlations, "Global-ELO"))
 
@@ -5131,6 +5313,24 @@ def render_style_tagging_v2(history: pd.DataFrame, standalone: bool = False) -> 
         st.info("This separate public tool keeps image and tagging traffic away from the analysis dashboard.")
 
 
+def render_rating_contract() -> None:
+    """Keep the scale contract visible before users interpret any graph."""
+    with st.expander("How to read every Elo on this page"):
+        st.write(rating_help())
+        st.markdown(
+            "- **Global-ELO:** all usable, de-duplicated competitions on one Open-readiness scale.\n"
+            "- **WC+-ELO:** World Cups/Series, World Championships and Olympic qualification evidence only.\n"
+            "- **IFSC-ELO:** every non-para competition published by IFSC.\n"
+            "- **Round and format variants:** only the named qualifying, semifinal, final, flash, onsight or scramble evidence.\n"
+            "- **Performance-ELO:** one round's signal, stabilized toward the frozen Cumulative-ELO; the raw estimate remains auditable."
+        )
+        st.caption(
+            "A newcomer can move quickly while labelled provisional; uncertainty falls only after "
+            "independent competitions agree. Pairwise probabilities are calibrated separately from "
+            "field ordering on competitions that occurred later than model tuning."
+        )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Comp Climbing Projections",
@@ -5180,6 +5380,7 @@ def main() -> None:
     if not selected:
         st.info("Select at least one athlete to begin.")
         st.stop()
+    render_rating_contract()
     workspace = st.segmented_control(
         "Workspace",
         ["Overview", "Actionable Analysis", "Physical Strength", "Tag Boulder Styles", "Maths behind"],
@@ -5243,25 +5444,6 @@ def main() -> None:
         render_maths_behind(
             athletes, data["correlations"], data["calibration"], data
         )
-
-    with st.expander("Rating glossary and model contract"):
-        st.write(rating_help())
-        st.markdown(
-            "- **Global-ELO-Onsight / Scramble / Flash:** only rounds with a confirmed procedure.\n"
-            "- **WC+-ELO-Qualies / Semies / Finals:** only the named round of World Cups/Series and harder events.\n"
-            "- **IFSC-ELO-Qualies / Semies / Finals:** only the named round of non-para IFSC events.\n"
-            "- **Performance-ELO:** the isolated level shown in one round, calculated from ratings frozen before the event."
-        )
-        st.markdown(
-            "**Why one exceptional Performance-ELO does not automatically accelerate Elo.** "
-            "One result can reflect real improvement, but also terrain fit and ordinary event noise. "
-            "The tested one-state dynamic challenger became slightly better at ordering fields but "
-            "worse at forecasting advancement probabilities after multi-round and cross-discipline "
-            "dependence were corrected. Production therefore keeps the uncertainty-sensitive, "
-            "zero-sum Elo. A future current-shape layer must first show repeated surprise across "
-            "independent competitions and improve frozen next-event forecasts."
-        )
-
 
 if __name__ == "__main__":
     main()
