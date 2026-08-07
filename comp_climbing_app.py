@@ -197,6 +197,8 @@ def read_data() -> dict[str, pd.DataFrame]:
         "sensitivity_status": ("latent_volatility_challenger_status.csv", "csv"),
         "country_entry": ("boulder_country_entry_progression.csv", "csv"),
         "cuwr_history": ("cuwr_top40_history.csv", "csv"),
+        "context_benchmarks": ("boulder_context_benchmarks.csv", "csv"),
+        "prediction_backtest": ("boulder_prediction_backtest_summary.csv", "csv"),
     }
     output: dict[str, pd.DataFrame] = {}
     for key, (filename, kind) in files.items():
@@ -984,7 +986,7 @@ def render_wr_pool(
     render_cuwr_cycle(cuwr_history)
 
 
-def render_country_entry_progression(
+def _render_country_entry_progression_legacy(
     evidence: pd.DataFrame, countries: list[str]
 ) -> None:
     st.markdown("#### Entry level and early circuit adaptation")
@@ -1047,7 +1049,99 @@ def render_country_entry_progression(
     )
 
 
-def render_cuwr_cycle(history: pd.DataFrame) -> None:
+def render_country_entry_progression(
+    evidence: pd.DataFrame, countries: list[str]
+) -> None:
+    st.markdown("#### Entry level and early circuit adaptation")
+    if evidence.empty:
+        st.caption("The chronological country-entry artifact is being rebuilt.")
+        return
+    frame = evidence.loc[evidence["country"].isin(countries)].copy()
+    if frame.empty:
+        st.caption("No matched entry histories for these countries.")
+        return
+    pools = sorted(frame["pool"].dropna().unique())
+    chosen_pool = st.selectbox(
+        "Competition pool", pools,
+        format_func=lambda value: str(value).replace("Boulder_", ""),
+        key="country_entry_pool_v2",
+    )
+    frame = frame.loc[frame["pool"].eq(chosen_pool)]
+    labels = {
+        "Global-ELO": "Senior/Open debut",
+        "IFSC-ELO": "IFSC debut",
+        "WC+-ELO": "WC+ debut",
+    }
+    frame["Evidence scope"] = frame["rating_family"].map(labels).fillna(frame["rating_family"])
+    chosen_family = st.segmented_control(
+        "Entry comparison", list(labels.values()), default="WC+ debut",
+        key="country_entry_family_v2",
+    ) or "WC+ debut"
+    shown = frame.loc[frame["Evidence scope"].eq(chosen_family)].copy()
+    view = st.segmented_control(
+        "Question", ["Level at entry", "Change in first three events"],
+        default="Level at entry", key="country_entry_question_v2",
+    ) or "Level at entry"
+    if view == "Level at entry":
+        value, low, high = "median_entry_elo", "entry_q25", "entry_q75"
+        title = f"Established Global-ELO before first {chosen_family.lower()}"
+        axis_title = "Frozen pre-event Global-ELO"
+    else:
+        value, low, high = "median_change_first_3", "change_q25", "change_q75"
+        title = f"Global-ELO change across first three {chosen_family.lower()} events"
+        axis_title = "Global-ELO change"
+    if shown.empty:
+        st.caption("No established pre-entry histories for this selection.")
+        return
+    shown = shown.sort_values(value)
+    error_plus = (
+        pd.to_numeric(shown[high], errors="coerce") - pd.to_numeric(shown[value], errors="coerce")
+        if high in shown else None
+    )
+    error_minus = (
+        pd.to_numeric(shown[value], errors="coerce") - pd.to_numeric(shown[low], errors="coerce")
+        if low in shown else None
+    )
+    figure = go.Figure(go.Scatter(
+        x=shown[value], y=shown["country"], mode="markers+text",
+        text=shown["athletes"].map(lambda count: f"n={int(count)}"),
+        textposition="middle right",
+        marker={"size": 13, "color": PALETTE["teal"], "line": {"color": "white", "width": 1}},
+        error_x={
+            "type": "data", "array": error_plus, "arrayminus": error_minus,
+            "visible": error_plus is not None, "color": "rgba(16,47,43,.38)",
+        },
+        customdata=np.column_stack([
+            shown["athletes"],
+            shown.get("median_prior_competitions", pd.Series(np.nan, index=shown.index)),
+            shown.get("median_observed_events", pd.Series(np.nan, index=shown.index)),
+        ]),
+        hovertemplate=(
+            "<b>%{y}</b><br>Median: %{x:.0f}<br>Athletes: %{customdata[0]:.0f}"
+            "<br>Prior competitions at entry: %{customdata[1]:.1f}"
+            "<br>Observed circuit events: %{customdata[2]:.1f}<extra></extra>"
+        ),
+    ))
+    if view != "Level at entry":
+        figure.add_vline(x=0, line_color="rgba(16,47,43,.45)", line_width=1)
+    figure.update_layout(
+        title=title, height=max(360, 62 * len(shown) + 130),
+        margin={"l": 55, "r": 75, "t": 65, "b": 55}, showlegend=False,
+    )
+    figure.update_xaxes(
+        title=axis_title, tickformat="+,.0f" if view != "Level at entry" else ",.0f"
+    )
+    figure.update_yaxes(title="")
+    st.plotly_chart(figure, width="stretch", theme=None)
+    st.caption(
+        "The old chart mostly compared shared cold-start priors. This version requires at "
+        "least two earlier independent competitions, then shows the median and middle 50% "
+        "of athletes. Early change still mixes selection, adaptation and model correction; "
+        "it is not proof that starts caused improvement."
+    )
+
+
+def _render_cuwr_cycle_legacy(history: pd.DataFrame) -> None:
     st.markdown("#### Top-40 CUWR pressure through the Olympic cycle")
     if history.empty:
         st.caption("The historical top-40 reconstruction is being rebuilt.")
@@ -1129,6 +1223,93 @@ def render_cuwr_cycle(history: pd.DataFrame) -> None:
     )
 
 
+def render_cuwr_cycle(history: pd.DataFrame) -> None:
+    st.markdown("#### Top-40 CUWR pressure through the Olympic cycle")
+    if history.empty:
+        st.caption("The historical top-40 reconstruction is being rebuilt.")
+        return
+    frame = history.copy()
+    frame["snapshot_date"] = pd.to_datetime(frame["snapshot_date"], errors="coerce")
+    pools = sorted(frame["pool"].dropna().unique())
+    chosen_pool = st.selectbox(
+        "CUWR history pool", pools,
+        format_func=lambda value: str(value).replace("Boulder_", ""),
+        key="cuwr_history_pool_v2",
+    )
+    frame = frame.loc[frame["pool"].eq(chosen_pool)].dropna(subset=["snapshot_date"])
+    window = st.segmented_control(
+        "History window", ["Current Olympic cycle", "Last two cycles", "All"],
+        default="Last two cycles", key="cuwr_window",
+    ) or "Last two cycles"
+    if window == "Current Olympic cycle":
+        frame = frame.loc[frame["snapshot_date"].ge(pd.Timestamp("2024-08-12"))]
+    elif window == "Last two cycles":
+        frame = frame.loc[frame["snapshot_date"].ge(pd.Timestamp("2017-01-01"))]
+    measure = st.segmented_control(
+        "Top-40 threshold", ["CUWR points", "Global-ELO"],
+        default="CUWR points", key="cuwr_measure",
+    ) or "CUWR points"
+    y = "rank40_points" if measure == "CUWR points" else "rank40_global_elo"
+    shown = frame.sort_values("snapshot_date").copy()
+    shown["Smoothed threshold"] = pd.to_numeric(shown[y], errors="coerce").rolling(
+        3, min_periods=1, center=True
+    ).median()
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(
+        x=shown["snapshot_date"], y=shown[y], mode="markers",
+        name="Observed reconstruction", marker={
+            "size": 7, "color": "rgba(70,91,88,.28)",
+        },
+        customdata=np.column_stack([
+            shown["cycle_phase"], shown["events_365"], shown["ranked_athletes"],
+        ]),
+        hovertemplate=(
+            "%{x|%Y-%m-%d}<br>Observed: %{y:.0f}"
+            "<br>Phase: %{customdata[0]}<br>Events in 365d: %{customdata[1]:.0f}"
+            "<br>Ranked athletes: %{customdata[2]:.0f}<extra></extra>"
+        ),
+    ))
+    figure.add_trace(go.Scatter(
+        x=shown["snapshot_date"], y=shown["Smoothed threshold"], mode="lines",
+        name="Three-snapshot median", line={"color": PALETTE["teal"], "width": 4},
+        hovertemplate="%{x|%Y-%m-%d}<br>Typical threshold: %{y:.0f}<extra></extra>",
+    ))
+    if measure == "Global-ELO":
+        figure.add_hline(
+            y=2000, line_dash="dash", line_color="rgba(11,122,117,.45)",
+            annotation_text="50% WC semifinal",
+        )
+    figure.update_layout(
+        title=(
+            "Reconstructed rank-40 points threshold"
+            if measure == "CUWR points" else "World-readiness of reconstructed rank 40"
+        ),
+        height=465, margin={"l": 65, "r": 35, "t": 65, "b": 55},
+        legend={"orientation": "h", "y": -0.18},
+    )
+    figure.update_yaxes(
+        title="Best-six points" if measure == "CUWR points" else "Global-ELO",
+        tickformat=",.0f",
+    )
+    figure.update_xaxes(title="Ranking snapshot")
+    st.plotly_chart(figure, width="stretch", theme=None)
+    latest = shown.dropna(subset=[y]).tail(1)
+    if not latest.empty:
+        latest_value = float(latest.iloc[0][y])
+        st.info(
+            f"Current reconstructed rank-40 threshold: {latest_value:,.0f} "
+            f"{'points' if measure == 'CUWR points' else 'Global-ELO'}. "
+            "Use targeted starts for athletes close enough that one result can change access; "
+            "protect longer development blocks for athletes still far below semifinal readiness.",
+            icon="🎯",
+        )
+    st.caption(
+        "Faint points are event-date reconstructions; the dark line is a three-snapshot median, "
+        "which removes the artificial spikes created by joining separate cycle-phase series. "
+        "This World-event proxy is not the official historical CUWR."
+    )
+
+
 def age_group(age: float) -> str:
     if pd.isna(age):
         return "Age unknown"
@@ -1207,6 +1388,12 @@ def render_progression(
             "marker density grows with athletes and rounds in that age bin."
         ),
     )
+    show_reference_range = st.toggle(
+        "Show the central 80% reference range",
+        value=False,
+        help="Off by default because the range can hide the athletes you are trying to compare.",
+        key="pathway_reference_range",
+    )
     if reference != "None":
         wc_mask = wc_plus_event_mask(history) & history["source_scope"].eq("IFSC")
         finalists = set(history.loc[
@@ -1254,17 +1441,23 @@ def render_progression(
         grouped = grouped.loc[grouped["athletes"].ge(3)].sort_values("age_year")
         if not grouped.empty:
             for gender, gender_rows in grouped.groupby("gender"):
+                gender_rows = gender_rows.sort_values("age_year").copy()
+                for column in ("rating", "low", "high"):
+                    gender_rows[column] = gender_rows[column].rolling(
+                        3, min_periods=1, center=True
+                    ).median()
                 color = PALETTE["teal"] if gender == "Men" else PALETTE["blue"]
-                figure.add_trace(go.Scatter(
-                    x=[*gender_rows["age_year"], *gender_rows["age_year"].iloc[::-1]],
-                    y=[*gender_rows["high"], *gender_rows["low"].iloc[::-1]],
-                    fill="toself", fillcolor=transparent(color, 0.11),
-                    line={"width": 0}, hoverinfo="skip", showlegend=False,
-                    legendgroup=f"reference-{gender}",
-                ))
+                if show_reference_range:
+                    figure.add_trace(go.Scatter(
+                        x=[*gender_rows["age_year"], *gender_rows["age_year"].iloc[::-1]],
+                        y=[*gender_rows["high"], *gender_rows["low"].iloc[::-1]],
+                        fill="toself", fillcolor=transparent(color, 0.08),
+                        line={"width": 0}, hoverinfo="skip", showlegend=False,
+                        legendgroup=f"reference-{gender}",
+                    ))
                 figure.add_trace(go.Scatter(
                     x=gender_rows["age_year"], y=gender_rows["rating"],
-                    mode="lines+markers", name=f"{reference} — {gender}",
+                    mode="lines", name=f"{reference} — {gender}",
                     customdata=np.column_stack([
                         gender_rows["athletes"], gender_rows["rounds"],
                     ]),
@@ -1275,17 +1468,14 @@ def render_progression(
                     ),
                     line={
                         "color": color,
-                        "width": 3, "dash": "dot",
-                    },
-                    marker={
-                        "color": color,
-                        "size": np.clip(5 + np.log1p(gender_rows["rounds"]) * 1.6, 7, 16),
-                        "opacity": np.clip(0.38 + gender_rows["athletes"] / 20, 0.45, 0.95),
+                        "width": 3, "dash": "dot", "shape": "spline",
                     },
                     legendgroup=f"reference-{gender}",
                 ))
     add_outcome_thresholds(figure, calibration)
-    figure.update_layout(height=570, margin={"l": 20, "r": 20, "t": 70, "b": 20})
+    figure.update_yaxes(tickformat=",.0f", title="Global-ELO")
+    figure.update_xaxes(title="Age")
+    figure.update_layout(height=570, margin={"l": 80, "r": 25, "t": 70, "b": 65})
     st.plotly_chart(figure, width="stretch", theme=None)
     st.info(compare_text(cohort, selected, "Global-ELO", "Progression"), icon="↗️")
 
@@ -1700,8 +1890,61 @@ def top_ribbon(
         return selected, discipline
 
 
+def relevant_rating_benchmarks(
+    focus: pd.DataFrame, calibration: pd.DataFrame, contexts: pd.DataFrame,
+) -> list[dict[str, object]]:
+    """Choose outcome references that answer the selected athletes' next questions."""
+    pools = focus.get("pool", pd.Series(dtype=str)).dropna().astype(str).unique().tolist()
+    benchmarks: list[dict[str, object]] = []
+    for outcome, label, color in (
+        ("semifinal", "50% WC semifinal", PALETTE["teal"]),
+        ("final", "50% WC final", PALETTE["blue"]),
+    ):
+        values = [outcome_threshold(calibration, outcome, pool) for pool in pools]
+        values = [value for value in values if np.isfinite(value)]
+        if values:
+            benchmarks.append({"label": label, "elo": float(np.mean(values)), "color": color})
+    if contexts.empty:
+        return benchmarks
+    matched = contexts.loc[
+        contexts["pool"].isin(pools)
+        & contexts["context"].eq("Canadian Senior Nationals")
+    ]
+    values = pd.to_numeric(matched.get("threshold_elo"), errors="coerce").dropna()
+    if not values.empty:
+        method = "fitted" if matched["method"].astype(str).str.startswith("fitted").any() else "median achiever"
+        benchmarks.append({
+            "label": f"Canadian Senior Nationals final ({method})",
+            "elo": float(values.mean()), "color": PALETTE["gold"],
+        })
+    youth_categories: set[str] = set()
+    for age in pd.to_numeric(focus.get("age"), errors="coerce").dropna():
+        next_age = float(age) + 1.0
+        if next_age < 17:
+            youth_categories.add("U17")
+        elif next_age < 19:
+            youth_categories.add("U19")
+        elif next_age < 21:
+            youth_categories.add("U21")
+    if youth_categories:
+        youth = contexts.loc[
+            contexts["pool"].isin(pools)
+            & contexts["context"].eq("Youth World Championships")
+            & contexts["category_group"].isin(youth_categories)
+        ]
+        for category, rows in youth.groupby("category_group"):
+            values = pd.to_numeric(rows["threshold_elo"], errors="coerce").dropna()
+            if not values.empty:
+                benchmarks.append({
+                    "label": f"50% Youth Worlds semifinal - next {category}",
+                    "elo": float(values.mean()), "color": PALETTE["coral"],
+                })
+    return benchmarks
+
+
 def rating_radar_figure(
     detail: pd.DataFrame, athlete_order: list[str], view: str,
+    benchmarks: list[dict[str, object]] | None = None,
 ) -> go.Figure:
     """Show rating shape while keeping evidence volume visible in hover/markers."""
     profiles = {
@@ -1729,19 +1972,31 @@ def rating_radar_figure(
         detail.loc[detail["Rating family"].isin(comparable_families), "Elo"],
         errors="coerce",
     ).dropna()
-    low = float(min(values.min() if not values.empty else 1900, 2000))
-    high = float(max(values.max() if not values.empty else 2100, 2000))
-    pad = max(60.0, (high - low) * 0.12)
-    radial_min = 50 * np.floor((low - pad) / 50)
-    radial_max = 50 * np.ceil((high + pad) / 50)
+    benchmarks = benchmarks or [{"label": "50% WC semifinal", "elo": 2000.0, "color": PALETTE["teal"]}]
+    benchmark_values = [
+        float(item["elo"]) for item in benchmarks
+        if np.isfinite(item.get("elo", np.nan))
+    ]
+    scale_values = [*values.tolist(), *benchmark_values]
+    low = float(min(scale_values) if scale_values else 1900)
+    high = float(max(scale_values) if scale_values else 2100)
+    pad = max(25.0, (high - low) * 0.08)
+    radial_min = 25 * np.floor((low - pad) / 25)
+    radial_max = 25 * np.ceil((high + pad) / 25)
+    radial_tick = max(50.0, 25.0 * np.ceil((radial_max - radial_min) / 125.0))
     figure = go.Figure()
     closed_labels = [*labels, labels[0]]
-    figure.add_trace(go.Scatterpolar(
-        r=[2000] * len(closed_labels), theta=closed_labels,
-        mode="lines", name="2000 · 50% 2025 WC semifinal reference",
-        line={"color": "rgba(16,47,43,.42)", "width": 1.5, "dash": "dash"},
-        hovertemplate="2000 reference<extra></extra>",
-    ))
+    for benchmark in benchmarks:
+        value = float(benchmark["elo"])
+        figure.add_trace(go.Scatterpolar(
+            r=[value] * len(closed_labels), theta=closed_labels,
+            mode="lines", name=f"{value:.0f} - {benchmark['label']}",
+            line={
+                "color": transparent(str(benchmark["color"]), 0.55),
+                "width": 1.4, "dash": "dash",
+            },
+            hovertemplate=f"{benchmark['label']}: {value:.0f} Elo<extra></extra>",
+        ))
     for athlete_index, athlete in enumerate(athlete_order):
         athlete_rows = visible.loc[visible["Athlete"].eq(athlete)].set_index("Rating family")
         if len(athlete_rows) < 3:
@@ -1819,6 +2074,7 @@ def rating_radar_figure(
         polar={
             "radialaxis": {
                 "range": [radial_min, radial_max], "tickformat": ",.0f",
+                "dtick": radial_tick,
                 "gridcolor": "rgba(113,129,126,.22)", "angle": 45,
             },
             "angularaxis": {"gridcolor": "rgba(113,129,126,.18)"},
@@ -1835,6 +2091,7 @@ def render_rating_detail(
     history: pd.DataFrame,
     selected: list[str],
     calibration: pd.DataFrame,
+    context_benchmarks: pd.DataFrame,
 ) -> None:
     st.subheader("Compared athletes · all rating evidence")
     focus = selected_rows(athletes, selected)
@@ -1882,6 +2139,7 @@ def render_rating_detail(
     )
     st.markdown(legend, unsafe_allow_html=True)
     athlete_order = focus["athlete_name"].map(friendly_name).tolist()
+    benchmarks = relevant_rating_benchmarks(focus, calibration, context_benchmarks)
     if 2 <= len(athlete_order) <= 5:
         radar_view = st.segmented_control(
             "Rating radar", ["All-competition profile", "World-circuit profile"],
@@ -1892,15 +2150,14 @@ def render_rating_detail(
             ),
         ) or "All-competition profile"
         st.plotly_chart(
-            rating_radar_figure(detail, athlete_order, radar_view),
+            rating_radar_figure(detail, athlete_order, radar_view, benchmarks),
             width="stretch", config={"displayModeBar": False},
         )
         st.caption(
-            "Further from the centre = higher Elo. The dashed 2000 ring is the normalized "
-            "50% semifinal reference. Larger markers mean more included rounds; a large shape "
-            "with tiny markers is a lead to investigate, not a settled conclusion. The two "
-            "radar views use identical axes; WC+ hover text reports the change from the "
-            "matching all-competition axis."
+            "Further from the centre = higher Elo. Dashed rings are selected for the athletes' "
+            "current pathway; a median-achiever ring is labelled when a 50% fit is too sparse. "
+            "Larger markers mean more included rounds. The two views keep identical axes, and "
+            "WC+ hover text reports the change from the matching all-competition axis."
         )
         delta_rows: list[dict[str, object]] = []
         axis_pairs = {
@@ -1984,6 +2241,263 @@ def render_rating_detail(
                     "Performance-ELO": st.column_config.NumberColumn(format="%d"),
                 },
             )
+        with st.expander("Inspect every competition round behind these ratings"):
+            evidence = history.merge(
+                ids, on=["pool", "global_id"], how="inner", suffixes=("", "_selected")
+            )
+            evidence["event_date"] = pd.to_datetime(evidence["event_date"], errors="coerce")
+            evidence["Athlete"] = evidence["athlete_name_selected"].map(friendly_name)
+            evidence["Global-ELO change"] = (
+                pd.to_numeric(evidence["rating_after"], errors="coerce")
+                - pd.to_numeric(evidence["rating_before"], errors="coerce")
+            )
+            if "n_athletes" not in evidence:
+                evidence["n_athletes"] = evidence.groupby(
+                    ["source_event_id", "pool", "round_group"]
+                )["global_id"].transform("nunique")
+            chosen_athlete = st.selectbox(
+                "Athlete evidence", athlete_order, key="rating_evidence_athlete"
+            )
+            scopes = ["All competitions", "IFSC", "WC+"]
+            chosen_scope = st.segmented_control(
+                "Competition evidence", scopes, default="All competitions",
+                key="rating_evidence_scope",
+            ) or "All competitions"
+            shown = evidence.loc[evidence["Athlete"].eq(chosen_athlete)].copy()
+            if chosen_scope == "IFSC":
+                shown = shown.loc[shown["source_scope"].eq("IFSC")]
+            elif chosen_scope == "WC+":
+                shown = shown.loc[
+                    shown["source_scope"].eq("IFSC") & wc_plus_event_mask(shown)
+                ]
+            shown = shown.sort_values("event_date", ascending=False)
+            shown = shown[[
+                "event_date", "event_name", "round_group", "confirmed_procedure",
+                "rank_numeric", "n_athletes", "performance_elo", "rating_before",
+                "rating_after", "Global-ELO change",
+            ]].rename(columns={
+                "event_date": "Event date", "event_name": "Competition",
+                "round_group": "Round", "confirmed_procedure": "Format",
+                "rank_numeric": "Place", "n_athletes": "Field size",
+                "performance_elo": "Performance-ELO", "rating_before": "Global-ELO before",
+                "rating_after": "Global-ELO after",
+            })
+            st.dataframe(
+                shown, hide_index=True, width="stretch", height=430,
+                column_config={
+                    "Event date": st.column_config.DateColumn(format="YYYY-MM-DD"),
+                    "Competition": st.column_config.TextColumn(width="large"),
+                    "Performance-ELO": st.column_config.NumberColumn(format="%.0f"),
+                    "Global-ELO before": st.column_config.NumberColumn(format="%.0f"),
+                    "Global-ELO after": st.column_config.NumberColumn(format="%.0f"),
+                    "Global-ELO change": st.column_config.NumberColumn(format="%+.0f"),
+                },
+            )
+            st.caption(
+                "Performance-ELO describes that isolated round. Global-ELO change is the "
+                "zero-sum update after the round; it is not a claim that one event changed ability."
+            )
+
+
+def current_form_signal(history: pd.DataFrame, athlete: pd.Series) -> tuple[float, int]:
+    """Previous-three independent-event surprise, matching the frozen backtest."""
+    rows = history.loc[
+        history["pool"].eq(athlete["pool"])
+        & history["global_id"].astype(str).eq(str(athlete["global_id"]))
+    ].copy()
+    if rows.empty:
+        return 0.0, 0
+    rows["event_date"] = pd.to_datetime(rows["event_date"], errors="coerce")
+    baseline = pd.to_numeric(rows.get("event_start_rating", rows["rating_before"]), errors="coerce")
+    rows["surprise"] = pd.to_numeric(rows["performance_elo"], errors="coerce") - baseline
+    event = (
+        rows.groupby(["source_scope", "source_event_id", "event_date"], as_index=False)
+        .agg(surprise=("surprise", "median"))
+        .dropna(subset=["event_date", "surprise"])
+        .sort_values("event_date")
+        .tail(3)
+    )
+    if event.empty:
+        return 0.0, 0
+    latest = event["event_date"].max()
+    ages = (latest - event["event_date"]).dt.days.to_numpy(float)
+    weights = np.power(0.5, np.maximum(ages, 0) / 180.0)
+    raw = float(np.average(event["surprise"].to_numpy(float), weights=weights))
+    evidence = len(event)
+    return float(np.clip(raw * evidence / (evidence + 2.0), -250, 250)), evidence
+
+
+def competition_level_figure(
+    history: pd.DataFrame, athlete: pd.Series, calibration: pd.DataFrame,
+) -> go.Figure:
+    """Combine stable level, isolated performances and field level without mixing them."""
+    athlete_rows = history.loc[
+        history["pool"].eq(athlete["pool"])
+        & history["global_id"].astype(str).eq(str(athlete["global_id"]))
+    ].copy()
+    athlete_rows["event_date"] = pd.to_datetime(athlete_rows["event_date"], errors="coerce")
+    athlete_rows = athlete_rows.dropna(subset=["event_date"]).sort_values("event_date")
+    figure = go.Figure()
+    if athlete_rows.empty:
+        return figure
+    figure.add_trace(go.Scatter(
+        x=athlete_rows["event_date"], y=athlete_rows["rating_after"],
+        mode="lines", name="Global-ELO after each round",
+        line={"color": PALETTE["ink"], "width": 3},
+        customdata=np.column_stack([athlete_rows["event_name"], athlete_rows["round_group"]]),
+        hovertemplate=(
+            "%{x|%Y-%m-%d}<br>%{customdata[0]} - %{customdata[1]}"
+            "<br>Global-ELO: %{y:.0f}<extra></extra>"
+        ),
+    ))
+    round_colors = {
+        "Qualification": PALETTE["blue"], "Semi-final": PALETTE["gold"],
+        "Final": PALETTE["coral"],
+    }
+    for round_group, rows in athlete_rows.groupby("round_group"):
+        field_sizes = rows.get("n_athletes", pd.Series(np.nan, index=rows.index))
+        figure.add_trace(go.Scatter(
+            x=rows["event_date"], y=rows["performance_elo"], mode="markers",
+            name=f"{round_group} Performance-ELO",
+            marker={
+                "color": round_colors.get(str(round_group), PALETTE["teal"]),
+                "size": np.clip(
+                    7 + np.log1p(pd.to_numeric(field_sizes, errors="coerce").fillna(1)),
+                    8, 15,
+                ),
+                "opacity": 0.68, "line": {"color": "white", "width": 1},
+            },
+            customdata=np.column_stack([rows["event_name"], rows["rank_numeric"], field_sizes]),
+            hovertemplate=(
+                "%{x|%Y-%m-%d}<br>%{customdata[0]}"
+                "<br>Place: %{customdata[1]:.0f} / %{customdata[2]:.0f}"
+                "<br>Performance-ELO: %{y:.0f}<extra>%{fullData.name}</extra>"
+            ),
+        ))
+    event_keys = athlete_rows[["source_event_id", "pool", "round_group"]].drop_duplicates()
+    field_rows = history.merge(
+        event_keys, on=["source_event_id", "pool", "round_group"], how="inner"
+    )
+    field_rows["event_date"] = pd.to_datetime(field_rows["event_date"], errors="coerce")
+    field = field_rows.groupby(
+        ["source_event_id", "pool", "round_group", "event_date", "event_name"],
+        as_index=False,
+    ).agg(field_level=("rating_before", "median"), field_size=("global_id", "nunique"))
+    figure.add_trace(go.Scatter(
+        x=field["event_date"], y=field["field_level"], mode="markers",
+        name="Median pre-round field Elo",
+        marker={"symbol": "line-ew", "size": 12, "color": "rgba(70,91,88,.48)"},
+        customdata=np.column_stack([field["event_name"], field["round_group"], field["field_size"]]),
+        hovertemplate=(
+            "%{x|%Y-%m-%d}<br>%{customdata[0]} - %{customdata[1]}"
+            "<br>Median field: %{y:.0f}<br>Field: %{customdata[2]:.0f}<extra></extra>"
+        ),
+    ))
+    latest_date = athlete_rows["event_date"].max()
+    latest_rating = pd.to_numeric(athlete_rows.iloc[-1]["rating_after"], errors="coerce")
+    annual_momentum = pd.to_numeric(athlete.get("momentum"), errors="coerce")
+    if np.isfinite(latest_rating) and np.isfinite(annual_momentum):
+        annual_momentum = float(np.clip(annual_momentum, -150, 150))
+        future = latest_date + pd.Timedelta(days=365)
+        projected = float(latest_rating + 0.65 * annual_momentum)
+        figure.add_vline(x=latest_date, line_dash="dash", line_color="rgba(16,47,43,.55)")
+        figure.add_trace(go.Scatter(
+            x=[latest_date, future], y=[latest_rating, projected], mode="lines",
+            name="Bounded trend hypothesis",
+            line={"color": PALETTE["teal"], "dash": "dash", "width": 3},
+            hovertemplate="%{x|%Y-%m-%d}<br>Hypothesis: %{y:.0f}<extra></extra>",
+        ))
+        figure.add_trace(go.Scatter(
+            x=[latest_date, future, future, latest_date],
+            y=[latest_rating - 35, projected - 90, projected + 90, latest_rating + 35],
+            fill="toself", fillcolor=transparent(PALETTE["teal"], 0.10),
+            line={"width": 0}, hoverinfo="skip", showlegend=False,
+        ))
+    add_outcome_thresholds(figure, calibration)
+    figure.update_layout(
+        title=None,
+        height=565, hovermode="closest", legend={"orientation": "h", "y": -0.22},
+        margin={"l": 65, "r": 25, "t": 65, "b": 110},
+    )
+    figure.update_yaxes(title="Elo on the shared World-readiness scale", tickformat=",.0f")
+    figure.update_xaxes(title="Competition date")
+    return figure
+
+
+def render_actionable_analysis(
+    athletes: pd.DataFrame, history: pd.DataFrame, selected: list[str],
+    calibration: pd.DataFrame,
+) -> None:
+    st.header("Actionable Analysis")
+    st.caption("A decision desk: what the evidence changes for the next training block or competition choice.")
+    focus = selected_rows(athletes, selected).copy()
+    if focus.empty:
+        st.info("Select at least one athlete with results.")
+        return
+    focus["selection_order"] = focus.apply(lambda row: selection_order(row, selected), axis=1)
+    focus = focus.sort_values("selection_order")
+    decision_rows = []
+    for _, athlete in focus.iterrows():
+        global_elo = pd.to_numeric(athlete.get("Global-ELO"), errors="coerce")
+        world_elo = pd.to_numeric(athlete.get("WC+-ELO"), errors="coerce")
+        momentum = pd.to_numeric(athlete.get("momentum"), errors="coerce")
+        evidence = pd.to_numeric(athlete.get("WC+-ELO evidence"), errors="coerce")
+        form_signal, form_events = current_form_signal(history, athlete)
+        next_start = (
+            float(world_elo + 0.50 * form_signal)
+            if np.isfinite(world_elo) else np.nan
+        )
+        gap = world_elo - global_elo if np.isfinite(world_elo) and np.isfinite(global_elo) else np.nan
+        if np.isfinite(gap) and gap < -45:
+            action = "Build WC-specific transfer: onsight simulations, unfamiliar setting and selected WC+ starts."
+            why = f"WC+-ELO is {abs(gap):.0f} below all-competition Elo."
+        elif np.isfinite(gap) and gap > 45:
+            action = "Protect the process that transfers well; use starts selectively, not for volume alone."
+            why = f"WC+-ELO is {gap:.0f} above all-competition Elo."
+        elif form_events >= 2 and form_signal > 45:
+            action = "Retest upward quickly: recent independent events are ahead of the steady estimate."
+            why = f"Backtested next-start form signal is +{form_signal:.0f} Elo."
+        else:
+            action = "Use the next start to answer a specific terrain or round question; keep the main training block intact."
+            why = "No large, well-supported transfer or momentum gap is visible."
+        confidence = "higher" if np.isfinite(evidence) and evidence >= 10 else "limited"
+        decision_rows.append({
+            "Athlete": friendly_name(athlete["athlete_name"]),
+            "What to do next": action, "Why": why,
+            "Evidence confidence": f"{confidence} ({int(evidence) if np.isfinite(evidence) else 0} WC+ rounds)",
+            "Next-start projection": (
+                f"{next_start:.0f} Elo" if np.isfinite(next_start) else "Not available"
+            ),
+            "Form evidence": f"{form_events} independent events",
+        })
+    for decision in decision_rows:
+        with st.container(border=True):
+            st.markdown(f"**{decision['Athlete']}**")
+            st.write(decision["What to do next"])
+            st.caption(
+                f"{decision['Why']} Next WC+ start: {decision['Next-start projection']} "
+                f"({decision['Form evidence']}). Stable-rating evidence: "
+                f"{decision['Evidence confidence']}."
+            )
+    athlete_options = focus["global_id"].astype(str).tolist()
+    labels = dict(zip(focus["global_id"].astype(str), focus["athlete_name"].map(friendly_name)))
+    chosen = st.selectbox(
+        "Competition-level timeline", athlete_options,
+        format_func=lambda value: labels[value], key="actionable_timeline_athlete",
+    )
+    athlete = focus.loc[focus["global_id"].astype(str).eq(str(chosen))].iloc[0]
+    st.markdown(
+        f"#### {friendly_name(athlete['athlete_name'])}: level, field and isolated performances"
+    )
+    st.plotly_chart(
+        competition_level_figure(history, athlete, calibration),
+        width="stretch", theme=None,
+    )
+    st.caption(
+        "Dots are noisy single-round performances; the dark line is the steadier cumulative estimate. "
+        "Grey marks describe the field faced. The future line is a bounded continuation of recent "
+        "direction, not a promised training response; its range widens because plans and health change."
+    )
 
 
 def startup_status(data: dict[str, pd.DataFrame]) -> None:
@@ -3195,12 +3709,96 @@ def render_physical_strength(
         )
 
 
+def render_prediction_backtest(summary: pd.DataFrame) -> None:
+    st.markdown("#### Which score best predicts the next competition?")
+    if summary.empty:
+        st.caption("The frozen chronological comparison is being rebuilt.")
+        return
+    scopes = summary["comparison_scope"].dropna().astype(str).unique().tolist()
+    scope = st.selectbox("Backtest comparison", scopes, key="prediction_backtest_scope")
+    shown = summary.loc[summary["comparison_scope"].eq(scope)].copy()
+    shown = shown.loc[pd.to_numeric(shown["events"], errors="coerce").gt(0)]
+    if shown.empty:
+        st.caption("No eligible future competitions for this comparison.")
+        return
+    shown["Field ordering"] = 100 * pd.to_numeric(shown["mean_rank_correlation"], errors="coerce")
+    shown["Head-to-head ordering"] = 100 * pd.to_numeric(shown["pairwise_accuracy"], errors="coerce")
+    shown["Top-8 probability error"] = pd.to_numeric(shown["top8_brier"], errors="coerce")
+    shown["Momentum weight"] = pd.to_numeric(shown["momentum_gain"], errors="coerce")
+    chart = px.bar(
+        shown.sort_values("Field ordering"), x="Field ordering", y="model",
+        orientation="h", color="Field ordering", color_continuous_scale="Teal",
+        range_color=[
+            float(shown["Field ordering"].min()),
+            float(shown["Field ordering"].max()),
+        ],
+        hover_data={
+            "events": True, "athlete_starts": True,
+            "Head-to-head ordering": ":.1f",
+            "Top-8 probability error": ":.3f",
+            "Momentum weight": ":.2f",
+        },
+        title="Frozen-before-event field ordering",
+    )
+    chart.update_layout(
+        height=max(350, 48 * len(shown) + 130), showlegend=False,
+        coloraxis_showscale=False, margin={"l": 145, "r": 30, "t": 65, "b": 55},
+    )
+    chart.update_xaxes(
+        title="Average rank correlation with the next result (%)", ticksuffix="%"
+    )
+    chart.update_yaxes(title="")
+    st.plotly_chart(chart, width="stretch", theme=None)
+    table = shown[[
+        "model", "events", "athlete_starts", "Field ordering",
+        "Head-to-head ordering", "Top-8 probability error", "Momentum weight",
+    ]].rename(columns={
+        "model": "Model", "events": "Competitions",
+        "athlete_starts": "Athlete-starts",
+    })
+    st.dataframe(
+        table.sort_values("Field ordering", ascending=False), hide_index=True, width="stretch",
+        column_config={
+            "Field ordering": st.column_config.NumberColumn(format="%.1f%%"),
+            "Head-to-head ordering": st.column_config.NumberColumn(format="%.1f%%"),
+            "Top-8 probability error": st.column_config.NumberColumn(format="%.3f"),
+            "Momentum weight": st.column_config.NumberColumn(format="%.2f"),
+        },
+    )
+    best_order = shown.loc[shown["Field ordering"].idxmax()]
+    probability_candidates = shown.dropna(subset=["Top-8 probability error"])
+    if not probability_candidates.empty:
+        best_probability = probability_candidates.loc[
+            probability_candidates["Top-8 probability error"].idxmin()
+        ]
+        st.success(
+            f"Best field ordering here: {best_order['model']} "
+            f"({best_order['Field ordering']:.1f}%). Lowest top-8 probability error: "
+            f"{best_probability['model']} ({best_probability['Top-8 probability error']:.3f}). "
+            "Those can differ: ordering a field and calibrating advancement probabilities are "
+            "related, but not identical jobs."
+        )
+    else:
+        st.info(
+            f"Best field ordering in this published evidence set: {best_order['model']} "
+            f"({best_order['Field ordering']:.1f}%). Probability scores were not built for "
+            "this domestic comparison."
+        )
+    st.caption(
+        "Every score is frozen before the competition. Momentum weights are selected only "
+        "on pre-2025 events, then judged from 2025 onward. Higher ordering is better; lower "
+        "probability error is better. CNR and CUWR comparisons use only athlete-fields where "
+        "both the ranking score and Elo existed before the result."
+    )
+
+
 def render_maths_behind(
     athletes: pd.DataFrame, correlations: pd.DataFrame, calibration: pd.DataFrame,
     data: dict[str, pd.DataFrame],
 ) -> None:
     st.header("Maths behind")
     st.caption("What each model is for, what it can predict, and where it can fail.")
+    render_prediction_backtest(data.get("prediction_backtest", pd.DataFrame()))
     comparison = pd.DataFrame([
         {
             "Model": "Global-ELO", "Best use": "Overall Open World-Cup readiness",
@@ -4583,11 +5181,15 @@ def main() -> None:
         st.info("Select at least one athlete to begin.")
         st.stop()
     workspace = st.segmented_control(
-        "Workspace", ["Overview", "Physical Strength", "Tag Boulder Styles", "Maths behind"],
+        "Workspace",
+        ["Overview", "Actionable Analysis", "Physical Strength", "Tag Boulder Styles", "Maths behind"],
         default="Overview", label_visibility="collapsed",
     )
     if workspace == "Overview":
-        render_rating_detail(athletes, data["history"], selected, data["calibration"])
+        render_rating_detail(
+            athletes, data["history"], selected, data["calibration"],
+            data["context_benchmarks"],
+        )
         st.header("Overview")
         section = st.segmented_control(
             "Overview section",
@@ -4616,6 +5218,10 @@ def main() -> None:
             ),
         }
         renderers[section]()
+    elif workspace == "Actionable Analysis":
+        render_actionable_analysis(
+            athletes, data["history"], selected, data["calibration"]
+        )
     elif workspace == "Physical Strength":
         render_physical_strength(athletes, selected, data)
     elif workspace == "Tag Boulder Styles":

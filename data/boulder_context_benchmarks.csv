@@ -1,0 +1,9 @@
+context,pool,category_group,outcome,threshold_elo,method,fit_pseudo_r2,athlete_starts,achievers,events,start_year,end_year,logistic_intercept,logistic_slope_per_100
+Canadian Senior Nationals,Boulder_Men,Open,Final,1997.972832791922,fitted 50% probability,0.1547363184459647,307,26,4,2021,2026,-2.714898278826397,1.526081260010594
+Canadian Senior Nationals,Boulder_Women,Open,Final,1965.577404577278,fitted 50% probability,0.2595643870607265,266,27,4,2021,2026,-2.7103397708400383,2.119185525080511
+Youth World Championships,Boulder_Men,U17,Semi-final,1822.7283892155292,fitted 50% probability,0.17767241871688855,514,168,8,2017,2025,-0.7511397950654264,4.160965790990635
+Youth World Championships,Boulder_Men,U19,Semi-final,1861.1538722683306,fitted 50% probability,0.19565732342113562,607,165,8,2017,2025,-1.1149449565832454,2.3510143396339482
+Youth World Championships,Boulder_Men,U21,Semi-final,1853.061864166243,fitted 50% probability,0.30094272898566643,463,140,7,2017,2024,-0.9586787307730431,2.771641634396398
+Youth World Championships,Boulder_Women,U17,Semi-final,1848.48712186295,fitted 50% probability,0.17623221069146755,522,165,8,2017,2025,-0.8188779674144365,3.541442915158883
+Youth World Championships,Boulder_Women,U19,Semi-final,1863.036532595729,fitted 50% probability,0.35207764785162554,535,163,8,2017,2025,-0.9394908259987287,3.598689170688542
+Youth World Championships,Boulder_Women,U21,Semi-final,1856.3415691220002,fitted 50% probability,0.3039429232437123,348,140,7,2017,2024,-0.3593449625563745,2.848441885183046
