@@ -474,11 +474,11 @@ def rating_help() -> str:
         "Youth), Olympic qualification events and the Olympics. Specialist ratings are shown only "
         "with at least two eligible rounds and enough athletes to calibrate the "
         "family; they shrink toward Global-ELO while evidence is limited. "
-        "Performance-ELO is a one-round signal stabilized toward the athlete's "
-        "frozen pre-round Cumulative-ELO. Direct WC+ evidence keeps its full "
-        "signal; lower-level rounds are shrunk more because transfer is less certain. "
-        "Larger, reliable fields also move it more; "
-        "the unshrunk round estimate remains visible in the evidence audit."
+        "Performance-ELO is the mean WC-level rating left plausible after combining "
+        "the athlete's frozen Cumulative-ELO prior with every beat/lost-to pairing "
+        "in that round. WC+ uses the full result likelihood; lower-level evidence is "
+        "tempered when translated to WC terrain. Posterior uncertainty and the "
+        "unregularized estimate remain visible in the evidence audit."
     )
 
 
@@ -2336,10 +2336,13 @@ def render_rating_detail(
             ]
             if "raw_performance_elo" in recent:
                 latest_columns.append("raw_performance_elo")
+            if "performance_elo_uncertainty" in recent:
+                latest_columns.insert(-1, "performance_elo_uncertainty")
             latest = recent[latest_columns].rename(columns={
                 "event_date": "Event date", "event_name": "Competition",
                 "round_group": "Round", "confirmed_procedure": "Procedure",
                 "performance_elo": "Performance-ELO",
+                "performance_elo_uncertainty": "Posterior uncertainty (SD)",
                 "raw_performance_elo": "Raw round estimate",
             })
             st.markdown("#### Latest round-performance signals")
@@ -2348,6 +2351,7 @@ def render_rating_detail(
                 column_config={
                     "Event date": st.column_config.DateColumn(format="YYYY-MM-DD"),
                     "Performance-ELO": st.column_config.NumberColumn(format="%d"),
+                    "Posterior uncertainty (SD)": st.column_config.NumberColumn(format="%d"),
                     "Raw round estimate": st.column_config.NumberColumn(format="%d"),
                 },
             )
@@ -2388,11 +2392,14 @@ def render_rating_detail(
             ]
             if "raw_performance_elo" in shown:
                 shown_columns.insert(7, "raw_performance_elo")
+            if "performance_elo_uncertainty" in shown:
+                shown_columns.insert(7, "performance_elo_uncertainty")
             shown = shown[shown_columns].rename(columns={
                 "event_date": "Event date", "event_name": "Competition",
                 "round_group": "Round", "confirmed_procedure": "Format",
                 "rank_numeric": "Place", "n_athletes": "Field size",
                 "performance_elo": "Performance-ELO", "rating_before": "Global-ELO before",
+                "performance_elo_uncertainty": "Posterior uncertainty (SD)",
                 "raw_performance_elo": "Raw round estimate",
                 "rating_after": "Global-ELO after",
             })
@@ -2402,6 +2409,7 @@ def render_rating_detail(
                     "Event date": st.column_config.DateColumn(format="YYYY-MM-DD"),
                     "Competition": st.column_config.TextColumn(width="large"),
                     "Performance-ELO": st.column_config.NumberColumn(format="%.0f"),
+                    "Posterior uncertainty (SD)": st.column_config.NumberColumn(format="%.0f"),
                     "Raw round estimate": st.column_config.NumberColumn(format="%.0f"),
                     "Global-ELO before": st.column_config.NumberColumn(format="%.0f"),
                     "Global-ELO after": st.column_config.NumberColumn(format="%.0f"),
@@ -2409,8 +2417,9 @@ def render_rating_detail(
                 },
             )
             st.caption(
-                "Performance-ELO is the round signal after reliability-weighted shrinkage "
-                "toward the frozen Cumulative-ELO. The raw estimate is retained for audit. "
+                "Performance-ELO is the mean of the WC-rating probability distribution "
+                "remaining after the round. SD shows its uncertainty; the unregularized "
+                "estimate is retained for audit. "
                 "Global-ELO change is the "
                 "zero-sum update after the round; it is not a claim that one event changed ability."
             )
@@ -2425,7 +2434,13 @@ def current_form_signal(history: pd.DataFrame, athlete: pd.Series) -> tuple[floa
     if rows.empty:
         return 0.0, 0
     rows["event_date"] = pd.to_datetime(rows["event_date"], errors="coerce")
-    baseline = pd.to_numeric(rows.get("event_start_rating", rows["rating_before"]), errors="coerce")
+    baseline = pd.to_numeric(
+        rows.get(
+            "event_start_global_rating",
+            rows.get("event_start_rating", rows["rating_before"]),
+        ),
+        errors="coerce",
+    )
     rows["surprise"] = pd.to_numeric(rows["performance_elo"], errors="coerce") - baseline
     event = (
         rows.groupby(["source_scope", "source_event_id", "event_date"], as_index=False)
@@ -2485,11 +2500,21 @@ def competition_level_figure(
                 ),
                 "opacity": 0.68, "line": {"color": "white", "width": 1},
             },
-            customdata=np.column_stack([rows["event_name"], rows["rank_numeric"], field_sizes]),
+            customdata=np.column_stack([
+                rows["event_name"], rows["rank_numeric"], field_sizes,
+                pd.to_numeric(
+                    rows.get(
+                        "performance_elo_uncertainty",
+                        pd.Series(np.nan, index=rows.index),
+                    ),
+                    errors="coerce",
+                ),
+            ]),
             hovertemplate=(
                 "%{x|%Y-%m-%d}<br>%{customdata[0]}"
                 "<br>Place: %{customdata[1]:.0f} / %{customdata[2]:.0f}"
-                "<br>Performance-ELO: %{y:.0f}<extra>%{fullData.name}</extra>"
+                "<br>Performance-ELO: %{y:.0f} ± %{customdata[3]:.0f}"
+                "<extra>%{fullData.name}</extra>"
             ),
         ))
         performances = pd.to_numeric(rows["performance_elo"], errors="coerce")
@@ -4201,11 +4226,17 @@ def render_maths_behind(
             st.dataframe(shown[["pool", *columns]], hide_index=True, width="stretch")
     st.markdown("#### Why a large Performance-ELO surprise does not get full weight immediately")
     st.write(
-        "The displayed Performance-ELO already moves partway from frozen Cumulative-ELO "
-        "toward the raw round estimate; large, reliable fields move it farther. The raw value "
-        "remains in the evidence audit. Repeated surprise across independent competitions is "
+        "Performance-ELO is the posterior mean after combining frozen Cumulative-ELO with "
+        "all beat/lost-to outcomes; WC+ uses the full likelihood and lower events use a "
+        "tempered likelihood. The raw value remains in the evidence audit. Repeated surprise "
+        "across independent competitions is "
         "stronger evidence of real change than several rounds at one event, so cumulative Elo "
         "still waits for repeated evidence instead of copying one result."
+    )
+    st.caption(
+        "Technical limit: beat/lost-to pairings from one round are related, not fully "
+        "independent. The posterior mean is useful; its SD is conditional model uncertainty, "
+        "not a complete measure of competition volatility."
     )
     st.caption(correlation_note(correlations, "Global-ELO"))
 
@@ -5322,7 +5353,7 @@ def render_rating_contract() -> None:
             "- **WC+-ELO:** World Cups/Series, World Championships and Olympic qualification evidence only.\n"
             "- **IFSC-ELO:** every non-para competition published by IFSC.\n"
             "- **Round and format variants:** only the named qualifying, semifinal, final, flash, onsight or scramble evidence.\n"
-            "- **Performance-ELO:** one round's signal, stabilized toward the frozen Cumulative-ELO; the raw estimate remains auditable."
+            "- **Performance-ELO:** posterior mean WC performance implied by every beat/lost-to pairing; uncertainty and the raw estimate remain auditable."
         )
         st.caption(
             "A newcomer can move quickly while labelled provisional; uncertainty falls only after "

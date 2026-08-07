@@ -36,14 +36,23 @@ semifinal probability at a randomly sampled 2025 Open World Cup.
 
 ## Performance-ELO
 
-The raw inverse-logistic round estimate remains in the audit data as
-`raw_performance_elo`. The public `performance_elo` is an empirical-Bayes
-posterior: the raw signal is shrunk toward the athlete's frozen pre-round
-Cumulative-ELO. Larger, reliable fields move it more. Direct WC+ evidence keeps
-the full observed round signal, while local/provincial evidence is pulled farther
-toward the cumulative estimate because its field and setting transfer are less
-certain. This makes the signal readable without hiding the original result, and
-it does not feed back as a second cumulative update.
+The public `performance_elo` is the mean of a posterior distribution over WC
+performance. Frozen Cumulative-ELO is its prior mean, with a 250-Elo form
+variance added so one round can differ materially from stable ability. Every
+beat/lost-to pairing contributes a Bradley-Terry likelihood against the frozen
+opponents' Global/Cumulative-ELO—as though those matchups occurred on WC
+terrain. WC+ uses the full likelihood. Lower events use a power
+likelihood based on their information quality and transfer to WC terrain. The
+posterior standard deviation is published as uncertainty; the unregularized
+inverse-logistic estimate remains auditable as `raw_performance_elo`. This
+signal does not feed back as a second cumulative update.
+
+The beat/lost-to terms form a composite likelihood: several pairings come from
+the same round and therefore are not fully independent observations. The mean
+is the requested WC-equivalent summary, but its standard deviation should be
+read as model uncertainty conditional on this approximation, not as a complete
+measure of all competition volatility. A Plackett-Luce ranking likelihood is a
+planned challenger rather than an untested production replacement.
 
 ## Locked forward comparison
 
@@ -77,5 +86,7 @@ not assumed to be the same as the Elo update scale.
 - A provisional rating remains an estimate with visible uncertainty.
 - Specialist round/format ratings shrink toward Global-ELO when evidence is
   sparse.
+- Performance-ELO uncertainty does not include every source of dependence
+  between pairings from the same round.
 - Model promotion should be revisited when more 2026+ competitions and tagged
   boulder-level evidence are available.
