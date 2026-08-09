@@ -33,8 +33,13 @@ ALL_RATINGS = [
 DEFAULT_ATHLETES = ["Oscar Baudrand", "Matthew Rodriguez", "Colin Duffy"]
 OUTCOME_ORDER = ("semifinal", "final", "podium", "win")
 WC_SEMIFINAL_RATING_PRIORITY = (
+    "WC+-ELO-Open",
     "WC+-ELO-Qualies",
+    "WC+-ELO",
+    "IFSC-ELO-Open",
     "IFSC-ELO-Qualies",
+    "IFSC-ELO",
+    "Global-ELO-Open",
     "Global-ELO-Qualies",
     "Global-ELO",
 )
@@ -915,8 +920,9 @@ def compare_text(
     if context == "Canadian":
         rank = leader.get("cnr_rank", np.nan)
         detail = (
-            f"The same athlete is CNR #{int(rank)}; disagreement between CNR and "
-            "Global-ELO is the useful review signal. "
+            f"The same athlete is CNR #{int(rank)}. This chart is the all-source "
+            "Global-ELO diagnostic; disagreement with CNR or the target-matched "
+            "WC benchmark is the useful review signal. "
             if pd.notna(rank) else "Their CNR rank is not matched in this snapshot. "
         )
     elif context == "IFSC":
@@ -937,10 +943,17 @@ def compare_text(
         detail = f"Their Global-ELO changed {leader.get('momentum', 0):+.0f} over the latest 365-day window. "
     else:
         detail = ""
-    return base + detail + (
-        "Read the gap with evidence count and last-result date; it is a projection "
-        "difference, not a selection verdict."
-    )
+    if context == "Canadian":
+        suffix = (
+            "Read this as an all-source rating gap, not the target-matched World "
+            "Cup benchmark or a selection verdict."
+        )
+    else:
+        suffix = (
+            "Read the gap with evidence count and last-result date; it is a projection "
+            "difference, not a selection verdict."
+        )
+    return base + detail + suffix
 
 
 def render_canadian_pool(
@@ -1028,7 +1041,7 @@ def projection_benchmark_labels(
 def wc_semifinal_rating_evidence(
     athlete: pd.Series,
 ) -> tuple[float, str, float, str]:
-    """Choose the most target-matched available qualification rating.
+    """Choose the most target-matched available Open-WC rating.
 
     Specialist ledgers are already mapped and evidence-shrunk onto the public
     Global-ELO display scale by the frozen rating-family builder. This hierarchy
@@ -1044,16 +1057,14 @@ def wc_semifinal_rating_evidence(
             pd.Series([athlete.get(f"{family} evidence", np.nan)]), errors="coerce"
         ).iloc[0]
         evidence_value = float(evidence) if np.isfinite(evidence) else np.nan
-        if family == "WC+-ELO-Qualies" and evidence_value >= 8:
-            certainty = "Higher target-match evidence"
-        elif (
-            family == "WC+-ELO-Qualies" and evidence_value >= 4
-        ) or (
-            family == "IFSC-ELO-Qualies" and evidence_value >= 8
-        ):
-            certainty = "Moderate target-match evidence"
+        if evidence_value >= 8:
+            certainty = "Established ledger (8+ rounds)"
+        elif evidence_value >= 4:
+            certainty = "Developing ledger (4–7 rounds)"
+        elif evidence_value >= 2:
+            certainty = "Provisional ledger (2–3 rounds)"
         else:
-            certainty = "Limited target-match evidence"
+            certainty = "Sparse fallback"
         return float(rating), family, evidence_value, certainty
     return np.nan, "Unavailable", np.nan, "Unavailable"
 
@@ -1087,6 +1098,12 @@ def render_canadian_projection_pilot(
         "Pool": focus.get("pool", pd.Series("", index=focus.index)).str.replace("Boulder_", "", regex=False),
         "Country": focus.get("country", pd.Series("", index=focus.index)),
         "All-source quality": focus.get("Global-ELO", pd.Series(np.nan, index=focus.index)),
+        "Open-WC quality": focus.get(
+            "WC+-ELO-Open", pd.Series(np.nan, index=focus.index)
+        ),
+        "Open-WC rounds": focus.get(
+            "WC+-ELO-Open evidence", pd.Series(np.nan, index=focus.index)
+        ),
         "WC+ qualification quality": focus.get(
             "WC+-ELO-Qualies", pd.Series(np.nan, index=focus.index)
         ),
@@ -1097,7 +1114,9 @@ def render_canadian_projection_pilot(
         "Canada-context quality": focus.get(
             "canada_projection_all_evidence", pd.Series(np.nan, index=focus.index)
         ),
-        "Rating-state SD": focus.get("Global-ELO uncertainty", pd.Series(np.nan, index=focus.index)),
+        "All-source rating-state SD proxy": focus.get(
+            "Global-ELO uncertainty", pd.Series(np.nan, index=focus.index)
+        ),
         "All-source rounds": focus.get(
             "Global-ELO evidence", pd.Series(np.nan, index=focus.index)
         ),
@@ -1110,11 +1129,13 @@ def render_canadian_projection_pilot(
         quality.style.format(
             {
                 "All-source quality": "{:.0f}",
+                "Open-WC quality": "{:.0f}",
+                "Open-WC rounds": "{:.0f}",
                 "WC+ qualification quality": "{:.0f}",
                 "WC+ qualification rounds": "{:.0f}",
                 "IFSC quality": "{:.0f}",
                 "Canada-context quality": "{:.0f}",
-                "Rating-state SD": "{:.0f}",
+                "All-source rating-state SD proxy": "{:.0f}",
                 "All-source rounds": "{:.0f}",
                 "World rank": "{:.0f}",
                 "365-day change": "{:+.0f}",
@@ -1125,16 +1146,20 @@ def render_canadian_projection_pilot(
         width="stretch",
     )
     st.caption(
-        "The primary semifinal mapping below uses target-matched qualification "
+        "The primary semifinal mapping below uses target-matched Open-WC "
         "evidence (WC+ first, then IFSC/global fallbacks). All-source and "
-        "Canada-context quality remain separate diagnostics. Rating-state SD "
-        "excludes event, field, attendance, injury and calibration uncertainty."
+        "Canada-context quality remain separate diagnostics. The displayed SD is "
+        "the available all-source rating-state proxy, not target-family uncertainty; "
+        "it excludes event, field, attendance, injury and calibration uncertainty."
     )
 
     projection_rows: list[dict[str, object]] = []
     for _, athlete in focus.iterrows():
-        rating, family, evidence, certainty = wc_semifinal_rating_evidence(athlete)
+        rating, family, evidence, evidence_support = wc_semifinal_rating_evidence(athlete)
         all_source_rating = athlete.get("Global-ELO", np.nan)
+        qualification_rating = pd.to_numeric(
+            pd.Series([athlete.get("WC+-ELO-Qualies", np.nan)]), errors="coerce"
+        ).iloc[0]
         uncertainty = athlete.get("Global-ELO uncertainty", np.nan)
         pool = athlete.get("pool")
         semifinal_projection = conditional_outcome_projection(
@@ -1142,6 +1167,9 @@ def render_canadian_projection_pilot(
         )
         all_source_projection = conditional_outcome_projection(
             all_source_rating, uncertainty, calibration, pool, "semifinal"
+        )
+        qualification_projection = conditional_outcome_projection(
+            qualification_rating, uncertainty, calibration, pool, "semifinal"
         )
         support_row = calibrated_outcome_row(calibration, pool, "semifinal")
         semifinal_reference = outcome_threshold(calibration, "semifinal", pool)
@@ -1153,6 +1181,10 @@ def render_canadian_projection_pilot(
             format_probability_sensitivity(all_source_projection)
             if all_source_projection is not None else "Unavailable"
         )
+        qualification_label = (
+            format_probability_sensitivity(qualification_projection)
+            if qualification_projection is not None else "Unavailable"
+        )
         transport_gap = (
             float(rating) - float(all_source_rating)
             if np.isfinite(rating) and np.isfinite(all_source_rating)
@@ -1162,9 +1194,10 @@ def render_canadian_projection_pilot(
             "Athlete": friendly_name(athlete.get("athlete_name")),
             "Pool": str(pool).replace("Boulder_", ""),
             "WC semifinal benchmark": target_label,
-            "Qualification evidence used": family,
+            "Target evidence used": family,
             "Included rounds": evidence,
-            "Evidence certainty": certainty,
+            "Target-family ledger status": evidence_support,
+            "Qualification-only sensitivity": qualification_label,
             "Target vs all-source gap": (
                 f"{transport_gap:+.0f} Elo" if np.isfinite(transport_gap) else "—"
             ),
@@ -1183,12 +1216,15 @@ def render_canadian_projection_pilot(
         width="stretch",
     )
     st.caption(
-        "The primary percentage maps the most target-specific available qualification "
+        "The primary percentage maps the most target-specific available Open-WC "
         "rating to the frozen 2025 advancement curve; the bracket varies that rating "
-        "by the shared rating-state SD. It is a model-conditional benchmark, not a "
+        "by the available all-source rating-state SD proxy. It is a model-conditional "
+        "benchmark, not a "
         "named-event probability or full interval. The all-source value is retained "
-        "only as a transport sensitivity: when it disagrees, the target-matched lane "
-        "governs WC guidance and certainty is reduced. Final/podium/win probabilities "
+        "only as a transport sensitivity; qualification-only shows the matching "
+        "round-family sensitivity. When lanes disagree, the Open-WC lane "
+        "governs directional WC guidance and the absolute estimate remains "
+        "model-sensitive. Final/podium/win probabilities "
         "are not inferred from the qualification-only lane."
     )
     with st.expander("Validation status and how to use this pilot"):

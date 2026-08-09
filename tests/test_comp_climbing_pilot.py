@@ -224,8 +224,8 @@ class CanadianPilotProjectionTests(unittest.TestCase):
         matthew = by_id.loc["IFSC:14842"]
         oscar_rating, oscar_family, oscar_evidence, _ = wc_semifinal_rating_evidence(oscar)
         matthew_rating, matthew_family, matthew_evidence, _ = wc_semifinal_rating_evidence(matthew)
-        self.assertEqual(oscar_family, "WC+-ELO-Qualies")
-        self.assertEqual(matthew_family, "WC+-ELO-Qualies")
+        self.assertEqual(oscar_family, "WC+-ELO-Open")
+        self.assertEqual(matthew_family, "WC+-ELO-Open")
         self.assertGreaterEqual(oscar_evidence, 8)
         self.assertGreaterEqual(matthew_evidence, 8)
         self.assertGreater(oscar_rating - matthew_rating, 75.0)
