@@ -9,10 +9,14 @@ from comp_climbing_app import (
     CURVE_ORDER_UNAVAILABLE,
     SPARSE_WIN_UNAVAILABLE,
     _projection_triplet_is_nested,
+    athlete_selector_frame,
     conditional_outcome_probability,
     conditional_outcome_projection,
     format_probability_sensitivity,
     projection_benchmark_labels,
+    quarantine_obvious_fixture_exposure,
+    selected_rows,
+    wc_semifinal_rating_evidence,
 )
 
 
@@ -138,6 +142,110 @@ class CanadianPilotProjectionTests(unittest.TestCase):
                 )
                 checked += 1
         self.assertEqual(checked, len(eligible))
+
+    def test_duplicate_names_select_only_the_stable_requested_record(self) -> None:
+        frame = pd.DataFrame(
+            {
+                "pool": ["Boulder_Men", "Boulder_Men"],
+                "global_id": ["CEC:595", "VL-GLOBAL:18197"],
+                "athlete_name": ["ALLORA KLINKER", "Allora Klinker"],
+                "name_key": ["alloraklinker", "alloraklinker"],
+                "country": ["CAN", ""],
+                "nationality": ["CAN", ""],
+                "Global-ELO": [1864.93, 1666.17],
+                "Global-ELO uncertainty": [72.76, 260.14],
+                "Global-ELO evidence": [18.0, 2.0],
+                "Global-ELO status": ["Established", "Provisional"],
+            }
+        )
+        selectors = athlete_selector_frame(frame)
+        self.assertEqual(len(selectors), 2)
+        self.assertTrue(selectors["_selection_label"].str.contains("CEC:595", regex=False).any())
+        chosen = selected_rows(frame, ["Boulder_Men::CEC:595"])
+        self.assertEqual(chosen["global_id"].tolist(), ["CEC:595"])
+        self.assertEqual(selected_rows(frame, ["CEC:595"])["global_id"].tolist(), ["CEC:595"])
+
+    def test_fixture_exposure_is_quarantined_per_identity_not_whole_field(self) -> None:
+        athletes = pd.DataFrame(
+            {
+                "global_id": ["CEC:1", "CEC:2"],
+                "cnr_rank": [1.0, 2.0],
+            }
+        )
+        history = pd.DataFrame(
+            {
+                "global_id": ["CEC:1", "CEC:1", "CEC:2"],
+                "event_name": ["Bouldering Test", "Real Nationals", "Real Nationals"],
+                "source_scope": ["CEC", "CEC", "CEC"],
+                "source_event_id": ["fixture", "real", "real"],
+            }
+        )
+        safe_athletes, safe_history, audit = quarantine_obvious_fixture_exposure(
+            athletes, history
+        )
+        self.assertEqual(safe_athletes["global_id"].tolist(), ["CEC:2"])
+        self.assertEqual(safe_history["global_id"].unique().tolist(), ["CEC:2"])
+        self.assertEqual(int(audit.iloc[0]["withheld_athlete_ids"]), 1)
+        self.assertEqual(int(audit.iloc[0]["withheld_canadian_rows"]), 1)
+
+    def test_deployed_fixture_guard_has_exact_closed_effect(self) -> None:
+        athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
+        history = pd.read_parquet("data/boulder_overview_history.parquet")
+        safe_athletes, safe_history, audit = quarantine_obvious_fixture_exposure(
+            athletes, history
+        )
+        row = audit.iloc[0]
+        self.assertEqual(int(row["fixture_event_rows"]), 2041)
+        self.assertEqual(int(row["fixture_source_events"]), 94)
+        self.assertEqual(int(row["withheld_athlete_ids"]), 731)
+        self.assertEqual(int(row["withheld_canadian_rows"]), 4)
+        self.assertFalse(
+            safe_history["event_name"].astype(str).str.contains(
+                r"(?i)\b(?:test|mock|demo|dummy|sandbox|hidden)\b", regex=True
+            ).any()
+        )
+        self.assertEqual(len(athletes) - len(safe_athletes), 731)
+
+    def test_deployed_colliding_names_are_exact_stable_choices(self) -> None:
+        athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
+        for selection_id, expected_global_id in (
+            ("Boulder_Women::CEC:595", "CEC:595"),
+            ("Boulder_Men::CEC:20", "CEC:20"),
+            ("Boulder_Men::USAC:610", "USAC:610"),
+        ):
+            chosen = selected_rows(athletes, [selection_id])
+            self.assertEqual(chosen["global_id"].tolist(), [expected_global_id])
+
+    def test_named_wc_regression_uses_target_qualification_not_all_source(self) -> None:
+        athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
+        calibration = pd.read_csv("data/boulder_elo_calibration.csv")
+        by_id = athletes.set_index("global_id")
+        oscar = by_id.loc["IFSC:11847"]
+        matthew = by_id.loc["IFSC:14842"]
+        oscar_rating, oscar_family, oscar_evidence, _ = wc_semifinal_rating_evidence(oscar)
+        matthew_rating, matthew_family, matthew_evidence, _ = wc_semifinal_rating_evidence(matthew)
+        self.assertEqual(oscar_family, "WC+-ELO-Qualies")
+        self.assertEqual(matthew_family, "WC+-ELO-Qualies")
+        self.assertGreaterEqual(oscar_evidence, 8)
+        self.assertGreaterEqual(matthew_evidence, 8)
+        self.assertGreater(oscar_rating - matthew_rating, 75.0)
+        self.assertLess(float(oscar["Global-ELO"]), float(matthew["Global-ELO"]))
+        oscar_projection = conditional_outcome_projection(
+            oscar_rating,
+            float(oscar["Global-ELO uncertainty"]),
+            calibration,
+            str(oscar["pool"]),
+            "semifinal",
+        )
+        matthew_projection = conditional_outcome_projection(
+            matthew_rating,
+            float(matthew["Global-ELO uncertainty"]),
+            calibration,
+            str(matthew["pool"]),
+            "semifinal",
+        )
+        assert oscar_projection is not None and matthew_projection is not None
+        self.assertGreater(oscar_projection[0], 2.0 * matthew_projection[0])
 
 
 if __name__ == "__main__":

@@ -32,6 +32,12 @@ ALL_RATINGS = [
 ]
 DEFAULT_ATHLETES = ["Oscar Baudrand", "Matthew Rodriguez", "Colin Duffy"]
 OUTCOME_ORDER = ("semifinal", "final", "podium", "win")
+WC_SEMIFINAL_RATING_PRIORITY = (
+    "WC+-ELO-Qualies",
+    "IFSC-ELO-Qualies",
+    "Global-ELO-Qualies",
+    "Global-ELO",
+)
 OUTCOME_LABELS = {
     "semifinal": "Semifinal",
     "final": "Final",
@@ -86,6 +92,7 @@ AGE_PROGRESSION_METHOD = (
     "min_0_20_years_bootstrap_se"
 )
 AGE_PROGRESSION_STATUS = "RESEARCH_AGGREGATE_MIN_20_NOT_CAUSAL"
+OBVIOUS_FIXTURE_EVENT_PATTERN = r"(?i)\b(?:test|mock|demo|dummy|sandbox|hidden)\b"
 
 
 def transparent(color: str, alpha: float = 0.12) -> str:
@@ -112,6 +119,52 @@ def friendly_name(value: object) -> str:
     return DISPLAY_OVERRIDES.get(plain_key(text), text)
 
 
+def quarantine_obvious_fixture_exposure(
+    athletes: pd.DataFrame,
+    history: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Withhold identities touched by clearly labelled source fixtures.
+
+    Ratings are sequential, so dropping only a displayed fixture row would
+    leave its update in that athlete's later state. The whole affected identity
+    is withheld until a clean rebuild; unrelated athletes remain unchanged.
+    """
+    if athletes.empty or history.empty or "event_name" not in history:
+        audit = pd.DataFrame([{
+            "fixture_event_rows": 0,
+            "fixture_source_events": 0,
+            "withheld_athlete_ids": 0,
+            "withheld_canadian_rows": 0,
+        }])
+        return athletes.copy(), history.copy(), audit
+    fixture = history["event_name"].astype("string").str.contains(
+        OBVIOUS_FIXTURE_EVENT_PATTERN, regex=True, na=False
+    )
+    fixture_rows = history.loc[fixture]
+    affected_ids = set(fixture_rows["global_id"].dropna().astype(str))
+    athlete_ids = athletes["global_id"].astype(str)
+    history_ids = history["global_id"].astype(str)
+    withheld = athletes.loc[athlete_ids.isin(affected_ids)]
+    audit = pd.DataFrame([{
+        "fixture_event_rows": int(fixture.sum()),
+        "fixture_source_events": int(
+            fixture_rows[["source_scope", "source_event_id"]]
+            .drop_duplicates().shape[0]
+        ),
+        "withheld_athlete_ids": len(affected_ids),
+        "withheld_canadian_rows": int(
+            withheld.get(
+                "cnr_rank", pd.Series(np.nan, index=withheld.index)
+            ).notna().sum()
+        ),
+    }])
+    return (
+        athletes.loc[~athlete_ids.isin(affected_ids)].copy(),
+        history.loc[~history_ids.isin(affected_ids)].copy(),
+        audit,
+    )
+
+
 @st.cache_data(show_spinner=False, ttl=900, max_entries=2)
 def read_data() -> dict[str, pd.DataFrame]:
     files = {
@@ -133,6 +186,12 @@ def read_data() -> dict[str, pd.DataFrame]:
             if kind == "parquet"
             else pd.read_csv(path, low_memory=False)
         )
+    safe_athletes, safe_history, fixture_audit = quarantine_obvious_fixture_exposure(
+        output["athletes"], output["history"]
+    )
+    output["athletes"] = safe_athletes
+    output["history"] = safe_history
+    output["fixture_quarantine"] = fixture_audit
     return output
 
 
@@ -345,9 +404,86 @@ def roster_names(
     return []
 
 
-def selected_rows(athletes: pd.DataFrame, names: list[str]) -> pd.DataFrame:
-    keys = {plain_key(name) for name in names}
-    return athletes.loc[athletes["name_key"].isin(keys)].copy()
+def athlete_selection_id(pool: object, global_id: object) -> str:
+    """Return the stable UI identity; display names are never selection keys."""
+    return f"{pool}::{global_id}"
+
+
+def athlete_selection_ids(frame: pd.DataFrame) -> pd.Series:
+    return pd.Series(
+        [
+            athlete_selection_id(pool, global_id)
+            for pool, global_id in zip(frame["pool"], frame["global_id"])
+        ],
+        index=frame.index,
+        dtype="string",
+    )
+
+
+def athlete_selector_frame(athletes: pd.DataFrame) -> pd.DataFrame:
+    """Build unique stable choices and visibly disambiguate duplicate names."""
+    selectors = athletes.dropna(subset=["pool", "global_id", "athlete_name"]).copy()
+    selectors = selectors.drop_duplicates(["pool", "global_id"], keep="first")
+    selectors["_selection_id"] = athlete_selection_ids(selectors)
+    selectors["_selection_label"] = selectors["athlete_name"].map(friendly_name)
+    duplicate_name = selectors["name_key"].map(selectors["name_key"].value_counts()).gt(1)
+    country = selectors.get(
+        "country", pd.Series("", index=selectors.index, dtype="string")
+    ).fillna("").astype(str).str.strip()
+    nationality = selectors.get(
+        "nationality", pd.Series("", index=selectors.index, dtype="string")
+    ).fillna("").astype(str).str.strip()
+    jurisdiction = country.where(country.ne(""), nationality).replace("", "source unverified")
+    selectors.loc[duplicate_name, "_selection_label"] = [
+        f"{friendly_name(name)} · {nation} · {global_id}"
+        for name, nation, global_id in zip(
+            selectors.loc[duplicate_name, "athlete_name"],
+            jurisdiction.loc[duplicate_name],
+            selectors.loc[duplicate_name, "global_id"],
+        )
+    ]
+    return selectors
+
+
+def preferred_selection_ids(selectors: pd.DataFrame, names: list[str]) -> list[str]:
+    """Resolve roster display names once, without selecting every same-name record."""
+    requested = {plain_key(name) for name in names}
+    matches = selectors.loc[selectors["name_key"].isin(requested)].copy()
+    if matches.empty:
+        return []
+    country = matches.get(
+        "country", pd.Series("", index=matches.index, dtype="string")
+    ).fillna("").astype(str).str.upper()
+    nationality = matches.get(
+        "nationality", pd.Series("", index=matches.index, dtype="string")
+    ).fillna("").astype(str).str.upper()
+    matches["_canadian"] = country.eq("CAN") | nationality.eq("CAN")
+    matches["_established"] = matches.get(
+        "Global-ELO status", pd.Series("", index=matches.index, dtype="string")
+    ).eq("Established")
+    matches["_rated"] = pd.to_numeric(matches.get("Global-ELO"), errors="coerce").notna()
+    matches["_evidence"] = pd.to_numeric(
+        matches.get("Global-ELO evidence"), errors="coerce"
+    ).fillna(-1)
+    matches = matches.sort_values(
+        ["name_key", "_canadian", "_established", "_rated", "_evidence", "_selection_id"],
+        ascending=[True, False, False, False, False, True],
+        kind="stable",
+    ).drop_duplicates("name_key", keep="first")
+    by_key = dict(zip(matches["name_key"], matches["_selection_id"]))
+    return [by_key[key] for key in map(plain_key, names) if key in by_key]
+
+
+def selected_rows(athletes: pd.DataFrame, selection_ids: list[str]) -> pd.DataFrame:
+    """Select exact athlete records by stable identity, never by a colliding name."""
+    tokens = {str(value) for value in selection_ids}
+    stable = (
+        athlete_selection_ids(athletes)
+        if {"pool", "global_id"}.issubset(athletes.columns)
+        else pd.Series("", index=athletes.index, dtype="string")
+    )
+    legacy_global_ids = athletes["global_id"].astype(str)
+    return athletes.loc[stable.isin(tokens) | legacy_global_ids.isin(tokens)].copy()
 
 
 def rating_help() -> str:
@@ -418,9 +554,9 @@ def add_selected_highlight(
     y: str,
 ) -> None:
     focus = selected_rows(frame, selected).dropna(subset=[x, y])
-    order = {plain_key(name): index for index, name in enumerate(selected)}
-    focus["_selection_order"] = focus["athlete_name"].map(
-        lambda name: order.get(plain_key(name), len(order))
+    order = {selection_id: index for index, selection_id in enumerate(selected)}
+    focus["_selection_order"] = athlete_selection_ids(focus).map(
+        lambda selection_id: order.get(selection_id, len(order))
     )
     focus = focus.sort_values("_selection_order")
     offsets = [(-58, -34), (-68, 18), (-54, 42)]
@@ -889,6 +1025,39 @@ def projection_benchmark_labels(
     return labels
 
 
+def wc_semifinal_rating_evidence(
+    athlete: pd.Series,
+) -> tuple[float, str, float, str]:
+    """Choose the most target-matched available qualification rating.
+
+    Specialist ledgers are already mapped and evidence-shrunk onto the public
+    Global-ELO display scale by the frozen rating-family builder. This hierarchy
+    changes the evidence lane, not the outcome calibration or its 2000 anchor.
+    """
+    for family in WC_SEMIFINAL_RATING_PRIORITY:
+        rating = pd.to_numeric(
+            pd.Series([athlete.get(family, np.nan)]), errors="coerce"
+        ).iloc[0]
+        if not np.isfinite(rating):
+            continue
+        evidence = pd.to_numeric(
+            pd.Series([athlete.get(f"{family} evidence", np.nan)]), errors="coerce"
+        ).iloc[0]
+        evidence_value = float(evidence) if np.isfinite(evidence) else np.nan
+        if family == "WC+-ELO-Qualies" and evidence_value >= 8:
+            certainty = "Higher target-match evidence"
+        elif (
+            family == "WC+-ELO-Qualies" and evidence_value >= 4
+        ) or (
+            family == "IFSC-ELO-Qualies" and evidence_value >= 8
+        ):
+            certainty = "Moderate target-match evidence"
+        else:
+            certainty = "Limited target-match evidence"
+        return float(rating), family, evidence_value, certainty
+    return np.nan, "Unavailable", np.nan, "Unavailable"
+
+
 def render_canadian_projection_pilot(
     athletes: pd.DataFrame,
     selected: list[str],
@@ -917,25 +1086,37 @@ def render_canadian_projection_pilot(
         "Athlete": focus["athlete_name"].map(friendly_name),
         "Pool": focus.get("pool", pd.Series("", index=focus.index)).str.replace("Boulder_", "", regex=False),
         "Country": focus.get("country", pd.Series("", index=focus.index)),
-        "Global-ELO": focus.get("Global-ELO", pd.Series(np.nan, index=focus.index)),
-        "Canada-context rating (not WC input)": focus.get(
+        "All-source quality": focus.get("Global-ELO", pd.Series(np.nan, index=focus.index)),
+        "WC+ qualification quality": focus.get(
+            "WC+-ELO-Qualies", pd.Series(np.nan, index=focus.index)
+        ),
+        "WC+ qualification rounds": focus.get(
+            "WC+-ELO-Qualies evidence", pd.Series(np.nan, index=focus.index)
+        ),
+        "IFSC quality": focus.get("IFSC-ELO", pd.Series(np.nan, index=focus.index)),
+        "Canada-context quality": focus.get(
             "canada_projection_all_evidence", pd.Series(np.nan, index=focus.index)
         ),
         "Rating-state SD": focus.get("Global-ELO uncertainty", pd.Series(np.nan, index=focus.index)),
-        "Eligible contests": focus.get(
+        "All-source rounds": focus.get(
             "Global-ELO evidence", pd.Series(np.nan, index=focus.index)
         ),
         "Status": focus.get("Global-ELO status", pd.Series("", index=focus.index)),
+        "World rank": focus.get("world_event_rank", pd.Series(np.nan, index=focus.index)),
         "365-day change": focus.get("momentum", pd.Series(np.nan, index=focus.index)),
     })
     st.markdown("#### Current quality")
     st.dataframe(
         quality.style.format(
             {
-                "Global-ELO": "{:.0f}",
-                "Canada-context rating (not WC input)": "{:.0f}",
+                "All-source quality": "{:.0f}",
+                "WC+ qualification quality": "{:.0f}",
+                "WC+ qualification rounds": "{:.0f}",
+                "IFSC quality": "{:.0f}",
+                "Canada-context quality": "{:.0f}",
                 "Rating-state SD": "{:.0f}",
-                "Eligible contests": "{:.0f}",
+                "All-source rounds": "{:.0f}",
+                "World rank": "{:.0f}",
                 "365-day change": "{:+.0f}",
             },
             na_rep="—",
@@ -944,54 +1125,71 @@ def render_canadian_projection_pilot(
         width="stretch",
     )
     st.caption(
-        "The Canada-context rating is a separate domestic-context estimate; the "
-        "World Cup mappings use Global-ELO only. Rating-state SD excludes event, "
-        "field, attendance, injury and calibration uncertainty."
+        "The primary semifinal mapping below uses target-matched qualification "
+        "evidence (WC+ first, then IFSC/global fallbacks). All-source and "
+        "Canada-context quality remain separate diagnostics. Rating-state SD "
+        "excludes event, field, attendance, injury and calibration uncertainty."
     )
 
     projection_rows: list[dict[str, object]] = []
     for _, athlete in focus.iterrows():
-        rating = athlete.get("Global-ELO", np.nan)
+        rating, family, evidence, certainty = wc_semifinal_rating_evidence(athlete)
+        all_source_rating = athlete.get("Global-ELO", np.nan)
         uncertainty = athlete.get("Global-ELO uncertainty", np.nan)
         pool = athlete.get("pool")
-        projections = {
-            outcome: conditional_outcome_projection(
-                rating, uncertainty, calibration, pool, outcome
-            )
-            for outcome in OUTCOME_ORDER
-        }
+        semifinal_projection = conditional_outcome_projection(
+            rating, uncertainty, calibration, pool, "semifinal"
+        )
+        all_source_projection = conditional_outcome_projection(
+            all_source_rating, uncertainty, calibration, pool, "semifinal"
+        )
         support_row = calibrated_outcome_row(calibration, pool, "semifinal")
-        benchmark_labels = projection_benchmark_labels(projections)
-        references = {
-            outcome: outcome_threshold(calibration, outcome, pool)
-            for outcome in OUTCOME_ORDER
-        }
+        semifinal_reference = outcome_threshold(calibration, "semifinal", pool)
+        target_label = (
+            format_probability_sensitivity(semifinal_projection)
+            if semifinal_projection is not None else "Unavailable"
+        )
+        all_source_label = (
+            format_probability_sensitivity(all_source_projection)
+            if all_source_projection is not None else "Unavailable"
+        )
+        transport_gap = (
+            float(rating) - float(all_source_rating)
+            if np.isfinite(rating) and np.isfinite(all_source_rating)
+            else np.nan
+        )
         row: dict[str, object] = {
             "Athlete": friendly_name(athlete.get("athlete_name")),
             "Pool": str(pool).replace("Boulder_", ""),
-            "Semifinal benchmark": benchmark_labels["semifinal"],
-            "Final benchmark": benchmark_labels["final"],
-            "Podium benchmark": benchmark_labels["podium"],
-            "Win benchmark": benchmark_labels["win"],
-            "Highest 50% reference met": readiness_reference_level(
-                rating, calibration, pool
-            ) or "Not available",
+            "WC semifinal benchmark": target_label,
+            "Qualification evidence used": family,
+            "Included rounds": evidence,
+            "Evidence certainty": certainty,
+            "Target vs all-source gap": (
+                f"{transport_gap:+.0f} Elo" if np.isfinite(transport_gap) else "—"
+            ),
+            "All-source sensitivity": all_source_label,
+            "Semifinal 50% reference": (
+                f"{format_rating_reference(semifinal_reference)} "
+                f"(n={_outcome_support(support_row, 'semifinal')})"
+            ),
         }
-        for outcome in OUTCOME_ORDER:
-            row[f"{OUTCOME_LABELS[outcome]} 50% reference"] = (
-                f"{format_rating_reference(references[outcome])} "
-                f"(n={_outcome_support(support_row, outcome)})"
-            )
         projection_rows.append(row)
-    st.markdown("#### Conditional 2025 Open World Cup benchmarks")
-    st.dataframe(pd.DataFrame(projection_rows), hide_index=True, width="stretch")
+    st.markdown("#### Target-matched World Cup semifinal benchmark")
+    projection_table = pd.DataFrame(projection_rows)
+    st.dataframe(
+        projection_table.style.format({"Included rounds": "{:.0f}"}, na_rep="—"),
+        hide_index=True,
+        width="stretch",
+    )
     st.caption(
-        "Each percentage is a historical conditional benchmark at the central "
-        "rating (rating -1 SD to +1 SD state range), not a confidence interval, "
-        "event forecast or total predictive interval. The outcome curves are "
-        "independently fitted; the interface suppresses a benchmark when their "
-        "ordering crosses. Support n is the number of 2025 achievers in the "
-        "gender-pool calibration."
+        "The primary percentage maps the most target-specific available qualification "
+        "rating to the frozen 2025 advancement curve; the bracket varies that rating "
+        "by the shared rating-state SD. It is a model-conditional benchmark, not a "
+        "named-event probability or full interval. The all-source value is retained "
+        "only as a transport sensitivity: when it disagrees, the target-matched lane "
+        "governs WC guidance and certainty is reduced. Final/podium/win probabilities "
+        "are not inferred from the qualification-only lane."
     )
     with st.expander("Validation status and how to use this pilot"):
         st.markdown(
@@ -1444,39 +1642,40 @@ def top_ribbon(
             "Discipline", ["Boulder"], default="Boulder",
             help="Boulder is the governed release focus. Lead and Speed stay out of this interface until Boulder is excellent.",
         )
-        names = sorted(athletes["athlete_name"].dropna().unique(), key=str.casefold)
+        selectors = athlete_selector_frame(athletes)
+        selectors = selectors.sort_values(
+            ["_selection_label", "_selection_id"], key=lambda values: values.astype(str).str.casefold()
+        )
+        selection_options = selectors["_selection_id"].tolist()
+        label_by_id = dict(zip(selectors["_selection_id"], selectors["_selection_label"]))
         selected: list[str]
         if mode == "Compare 3":
             columns = st.columns(3)
-            names_by_key = {plain_key(name): name for name in names}
-            defaults = [
-                names_by_key[plain_key(name)]
-                for name in DEFAULT_ATHLETES
-                if plain_key(name) in names_by_key
-            ]
-            while len(defaults) < 3 and names:
-                candidate = names[min(len(defaults), len(names) - 1)]
+            defaults = preferred_selection_ids(selectors, DEFAULT_ATHLETES)
+            while len(defaults) < 3 and selection_options:
+                candidate = selection_options[min(len(defaults), len(selection_options) - 1)]
                 if candidate not in defaults:
                     defaults.append(candidate)
                 else:
                     break
             selected = []
             for index, column in enumerate(columns):
-                default = defaults[index] if index < len(defaults) else names[0]
+                default = defaults[index] if index < len(defaults) else selection_options[0]
                 selected.append(column.selectbox(
                     "Main athlete" if index == 0 else f"Comparison {index + 1}",
-                    names,
-                    index=names.index(default),
-                    format_func=friendly_name,
+                    selection_options,
+                    index=selection_options.index(default),
+                    format_func=lambda value: label_by_id[value],
                     key=f"athlete_{index}",
                 ))
         else:
             preset = roster_names(mode, athletes, history, rosters)
-            matched = athletes.loc[athletes["name_key"].isin({plain_key(name) for name in preset}), "athlete_name"].dropna().unique().tolist()
+            matched = preferred_selection_ids(selectors, preset)
             selected = st.multiselect(
                 f"{mode} athletes",
-                names,
+                selection_options,
                 default=matched[:12],
+                format_func=lambda value: label_by_id[value],
                 help="Choose up to the athletes you need; the three first selections receive the strongest visual emphasis.",
             )
             if mode == "Canadian National Team proxy":
@@ -1565,6 +1764,19 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
             st.success(
                 f"Ready · {len(data['athletes']):,} Boulder athletes · results through {latest:%Y-%m-%d}."
             )
+            fixture_audit = data.get("fixture_quarantine", pd.DataFrame())
+            if not fixture_audit.empty:
+                row = fixture_audit.iloc[0]
+                withheld_ids = int(row.get("withheld_athlete_ids", 0))
+                if withheld_ids:
+                    st.info(
+                        "Source-semantic guard: "
+                        f"{withheld_ids:,} athlete identities touched by "
+                        f"{int(row.get('fixture_source_events', 0)):,} clearly labelled "
+                        "test/demo source events are withheld until their ratings are rebuilt. "
+                        "This stopgap removes direct exposure only. Indirect opponent effects "
+                        "may remain in later real events until a fixture-clean rating rebuild."
+                    )
             calibration = data.get("calibration", pd.DataFrame())
             if not calibration.empty:
                 combined = calibration.loc[calibration["pool"].eq("Boulder_All")]
