@@ -8,7 +8,9 @@ does not retain the full research warehouse in memory.
 from __future__ import annotations
 
 from datetime import date
+import hashlib
 import hmac
+import json
 import os
 from pathlib import Path
 import unicodedata
@@ -30,29 +32,7 @@ ALL_RATINGS = [
     "WC+-ELO-Semies", "WC+-ELO-Finals", "IFSC-ELO", "IFSC-ELO-Qualies",
     "IFSC-ELO-Semies", "IFSC-ELO-Finals",
 ]
-DEFAULT_ATHLETES = ["Oscar Baudrand", "Matthew Rodriguez", "Colin Duffy"]
-OUTCOME_ORDER = ("semifinal", "final", "podium", "win")
-WC_SEMIFINAL_RATING_PRIORITY = (
-    "WC+-ELO-Open",
-    "WC+-ELO-Qualies",
-    "WC+-ELO",
-    "IFSC-ELO-Open",
-    "IFSC-ELO-Qualies",
-    "IFSC-ELO",
-    "Global-ELO-Open",
-    "Global-ELO-Qualies",
-    "Global-ELO",
-)
-OUTCOME_LABELS = {
-    "semifinal": "Semifinal",
-    "final": "Final",
-    "podium": "Podium",
-    "win": "Win",
-}
-CURVE_ORDER_UNAVAILABLE = "Unavailable - independent curves are not ordered"
-SPARSE_WIN_UNAVAILABLE = "Unavailable - sparse win curve crosses podium"
-CALIBRATION_SEASON = 2025
-CALIBRATION_COMPETITION = "IFSC Open World Cups"
+DEFAULT_ATHLETES = ["Oscar Baudrand", "Matthew Rodriguez", "Hugo Dorval"]
 FROZEN_2026_HOLDOUT_ARTIFACT = (
     "a8225902e3181c58308586b1fe24338fd542e617ffe490202f5d55eaa28f94ce"
 )
@@ -128,18 +108,21 @@ def quarantine_obvious_fixture_exposure(
     athletes: pd.DataFrame,
     history: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Withhold identities touched by clearly labelled source fixtures.
+    """Remove fixture event keys but retain identities and legitimate rows.
 
-    Ratings are sequential, so dropping only a displayed fixture row would
-    leave its update in that athlete's later state. The whole affected identity
-    is withheld until a clean rebuild; unrelated athletes remain unchanged.
+    Directly exposed identities retain their roster/CNR fields so the clean
+    current-WC replay can still be used. Their unreplayed legacy ELO diagnostics
+    are blanked rather than applying a whole-identity penalty.
     """
     if athletes.empty or history.empty or "event_name" not in history:
         audit = pd.DataFrame([{
             "fixture_event_rows": 0,
             "fixture_source_events": 0,
-            "withheld_athlete_ids": 0,
-            "withheld_canadian_rows": 0,
+            "fixture_pool_event_keys": 0,
+            "fixture_exposed_athlete_ids": 0,
+            "legacy_rating_rows_blanked": 0,
+            "legacy_history_rating_rows_blanked": 0,
+            "retained_canadian_identities": 0,
         }])
         return athletes.copy(), history.copy(), audit
     fixture = history["event_name"].astype("string").str.contains(
@@ -147,40 +130,351 @@ def quarantine_obvious_fixture_exposure(
     )
     fixture_rows = history.loc[fixture]
     affected_ids = set(fixture_rows["global_id"].dropna().astype(str))
-    athlete_ids = athletes["global_id"].astype(str)
-    history_ids = history["global_id"].astype(str)
-    withheld = athletes.loc[athlete_ids.isin(affected_ids)]
+    key_columns = [
+        column for column in ("source_scope", "source_event_id", "pool")
+        if column in history.columns
+    ]
+    if len(key_columns) < 2:
+        raise ValueError("fixture history lacks a stable source-event key")
+    fixture_keys = fixture_rows[key_columns].drop_duplicates()
+    keyed_history = history.merge(
+        fixture_keys.assign(_fixture_event_key=True), on=key_columns, how="left"
+    )
+    safe_history = keyed_history.loc[
+        keyed_history["_fixture_event_key"].ne(True)
+    ].drop(columns="_fixture_event_key")
+    if safe_history["event_name"].astype("string").str.contains(
+        OBVIOUS_FIXTURE_EVENT_PATTERN, regex=True, na=False
+    ).any():
+        raise RuntimeError("an obvious fixture event survived event-key quarantine")
+
+    history_exposed = safe_history["global_id"].astype(str).isin(affected_ids)
+    history_rating_columns = [
+        column
+        for column in safe_history.columns
+        if (
+            column.startswith("rating_")
+            or column.startswith("event_start_")
+            or "performance_elo" in column
+        )
+    ]
+    safe_history.loc[history_exposed, history_rating_columns] = np.nan
+    safe_history["legacy_fixture_exposed"] = history_exposed
+
+    safe_athletes = athletes.copy()
+    exposed = safe_athletes["global_id"].astype(str).isin(affected_ids)
+    legacy_rating_columns = [
+        column
+        for column in safe_athletes.columns
+        if (
+            "ELO" in column
+            or column in {
+                "momentum",
+                "canada_projection_all_evidence",
+                "cec_projected_rating",
+                "cec_context_offset",
+            }
+        )
+    ]
+    safe_athletes.loc[exposed, legacy_rating_columns] = np.nan
+    safe_athletes["legacy_fixture_exposed"] = exposed
+    cnr_rank = pd.to_numeric(
+        safe_athletes.get(
+            "cnr_rank", pd.Series(np.nan, index=safe_athletes.index)
+        ),
+        errors="coerce",
+    )
     audit = pd.DataFrame([{
-        "fixture_event_rows": int(fixture.sum()),
+        "fixture_event_rows": int(len(history) - len(safe_history)),
         "fixture_source_events": int(
             fixture_rows[["source_scope", "source_event_id"]]
-            .drop_duplicates().shape[0]
+            .drop_duplicates()
+            .shape[0]
         ),
-        "withheld_athlete_ids": len(affected_ids),
-        "withheld_canadian_rows": int(
-            withheld.get(
-                "cnr_rank", pd.Series(np.nan, index=withheld.index)
-            ).notna().sum()
-        ),
+        "fixture_pool_event_keys": int(len(fixture_keys)),
+        "fixture_exposed_athlete_ids": len(affected_ids),
+        "legacy_rating_rows_blanked": int(exposed.sum()),
+        "legacy_history_rating_rows_blanked": int(history_exposed.sum()),
+        "retained_canadian_identities": int((exposed & cnr_rank.notna()).sum()),
     }])
-    return (
-        athletes.loc[~athlete_ids.isin(affected_ids)].copy(),
-        history.loc[~history_ids.isin(affected_ids)].copy(),
-        audit,
+    return safe_athletes, safe_history, audit
+
+
+def load_current_wc_projection_artifact(
+    data_dir: Path = DATA,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Load the current pilot only when its clean replay contract is intact."""
+
+    csv_path = data_dir / "canadian_current_wc_projection_v3_youth_world_complete.csv"
+    metadata_path = (
+        data_dir
+        / "canadian_current_wc_projection_v3_youth_world_complete.metadata.json"
     )
+    if not csv_path.is_file() or not metadata_path.is_file():
+        return pd.DataFrame(), {
+            "verified": False,
+            "reason": "projection CSV or metadata is missing",
+        }
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        csv_record = metadata["csv"]
+        clean = metadata["clean_input"]
+        model = metadata["model"]
+        calibration = metadata["calibration"]
+        low_wc = metadata["low_wc_evidence_calibration"]
+        claims = metadata["claims"]
+        digest = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+        if metadata.get("schema") != "canadian-current-wc-projection-public-metadata-v1":
+            raise ValueError("unexpected projection metadata schema")
+        if csv_record.get("filename") != csv_path.name:
+            raise ValueError("projection filename binding mismatch")
+        if digest != csv_record.get("sha256"):
+            raise ValueError("projection CSV hash mismatch")
+        if csv_path.stat().st_size != int(csv_record.get("bytes", -1)):
+            raise ValueError("projection CSV byte-count mismatch")
+        if model.get("name") != "joint_rank_form_target":
+            raise ValueError("unexpected governing projection model")
+        if not bool(model.get("initializer_converged")):
+            raise ValueError("current initializer did not converge")
+        if model.get("initializer_warm_start_sha256") not in (None, ""):
+            raise ValueError("current initializer was not refit from priors")
+        routing = model.get("target_domain_routing", {})
+        if routing.get("schema") != "ifsc-youth-world-separate-target-head-v1":
+            raise ValueError("Youth-World target-domain routing is not sealed")
+        if routing.get("replay_target_domain") != "ifsc_youth_world":
+            raise ValueError("Youth Worlds do not have the expected target head")
+        if routing.get("senior_open_world_major_target_domain") != "wc+":
+            raise ValueError("Senior World-major target routing changed")
+        if any(
+            int(routing.get(field, -1)) != expected
+            for field, expected in (
+                ("rows_routed", 5752),
+                ("source_events_routed", 11),
+                ("pool_events_routed", 22),
+                ("athletes_with_youth_world_evidence", 2515),
+                ("mixed_target_batches", 0),
+                ("youth_world_rows_in_senior_wc_target_state", 0),
+                ("ranking_values_changed", 0),
+                ("identity_values_changed", 0),
+                ("graph_edges_removed", 0),
+            )
+        ):
+            raise ValueError("Youth-World routing closure failed")
+        if routing.get("senior_open_world_major_preserved_in_wc_plus") is not True:
+            raise ValueError("Senior World-major WC+ routing was not preserved")
+        post_cutoff = routing.get("post_cutoff_replay", {})
+        if any(
+            int(post_cutoff.get(field, -1)) != expected
+            for field, expected in (
+                ("pool_events", 6),
+                ("athlete_events", 1111),
+                ("source_pool_events", 6),
+                ("youth_world_events_in_wc_plus", 0),
+                ("all_history_source_event_inventory_count", 11),
+            )
+        ):
+            raise ValueError("Youth-World post-cutoff replay closure failed")
+        if post_cutoff.get("target_domain") != "ifsc_youth_world":
+            raise ValueError("Youth-World replay target changed")
+        if post_cutoff.get("all_history_source_event_inventory_sha256") != (
+            "28fe20328b6eb6c6ed8893a045ff2eea66940f3a4cd47aa83d70ac6daef9005a"
+        ):
+            raise ValueError("Youth-World source-event inventory changed")
+        if post_cutoff.get("asserted_exact") is not True:
+            raise ValueError("Youth-World replay closure is not exact")
+        if any(
+            int(clean.get(field, -1)) != 0
+            for field in (
+                "surviving_obvious_fixture_rows",
+                "surviving_flagged_event_keys",
+                "ambiguous_mixed_name_event_keys",
+            )
+        ):
+            raise ValueError("fixture-event closure failed")
+        if not bool(calibration.get("event_clean_refit")):
+            raise ValueError("base advancement calibration is not event-clean")
+        clean_slope = float(calibration.get("slope_per_100", np.nan))
+        if not np.isfinite(clean_slope) or clean_slope <= 0.0:
+            raise ValueError("advancement calibration slope is not positive")
+        if not bool(low_wc.get("event_clean_refit")):
+            raise ValueError("low-WC calibration is not event-clean")
+        if low_wc.get("class") != "zero_or_one_prior_senior_open_wc_plus_competition":
+            raise ValueError("unexpected low-WC evidence class")
+        if low_wc.get("central_route") != (
+            "separate_k0_k1_intercept_adjusted_links"
+        ):
+            raise ValueError("unexpected low-WC calibration route")
+        zero_prior = low_wc.get("zero_prior", {})
+        one_prior = low_wc.get("one_prior", {})
+        for expected_k, record in ((0, zero_prior), (1, one_prior)):
+            if int(record.get("prior_competitions", -1)) != expected_k:
+                raise ValueError("low-WC evidence class count mismatch")
+            if record.get("tau_selection") != (
+                "minimum_2025_leave_source_event_class_log_loss"
+            ):
+                raise ValueError("unexpected low-WC shrinkage selection rule")
+            if record.get("slope_policy") != "fixed_to_clean_base_slope":
+                raise ValueError("low-WC score discrimination policy changed")
+            intercept = float(record.get("intercept", np.nan))
+            slope = float(record.get("slope_per_100", np.nan))
+            tau = float(record.get("shrinkage_tau", np.nan))
+            if not all(np.isfinite(value) for value in (intercept, slope, tau)):
+                raise ValueError("nonfinite low-WC calibration coefficient")
+            if slope <= 0.0 or tau <= 0.0:
+                raise ValueError("invalid low-WC transport calibration")
+            if not np.isclose(slope, clean_slope, rtol=0.0, atol=1e-12):
+                raise ValueError(
+                    "intercept-adjusted low-WC link changed the clean score slope"
+                )
+        for record, prefix in (
+            (calibration, "clean_2026"),
+            (calibration, "clean_2026_canadian"),
+            (low_wc, "clean_2026"),
+            (zero_prior, "clean_2026"),
+            (one_prior, "clean_2026"),
+        ):
+            rows = int(record.get(f"{prefix}_rows", 0))
+            positives = int(record.get(f"{prefix}_positives", -1))
+            predicted = float(record.get(f"{prefix}_predicted_rate", np.nan))
+            observed = float(record.get(f"{prefix}_observed_rate", np.nan))
+            log_loss = float(record.get(f"{prefix}_log_loss", np.nan))
+            brier = float(record.get(f"{prefix}_brier", np.nan))
+            if rows <= 0 or positives < 0 or positives > rows:
+                raise ValueError(f"invalid {prefix} validation counts")
+            if not all(
+                np.isfinite(value)
+                for value in (predicted, observed, log_loss, brier)
+            ):
+                raise ValueError(f"nonfinite {prefix} validation metric")
+            if not (0.0 <= predicted <= 1.0 and 0.0 <= observed <= 1.0):
+                raise ValueError(f"invalid {prefix} validation rate")
+        if claims.get("bridge_governs_central_probability") is not False:
+            raise ValueError("bridge is not restricted to sensitivity analysis")
+        if claims.get("rating_state_sensitivity_uses_bridge_sd") is not False:
+            raise ValueError("bridge uncertainty leaked into rating-state sensitivity")
+        if claims.get("whole_identity_fixture_penalty") is not False:
+            raise ValueError("whole-identity fixture penalty is active")
+        if claims.get("youth_world_directly_updates_senior_wc_offset") is not False:
+            raise ValueError("Youth Worlds directly update the Senior-WC target head")
+        if claims.get("youth_world_shared_skill_graph_preserved") is not True:
+            raise ValueError("Youth-World pairwise graph evidence was discarded")
+        frame = pd.read_csv(csv_path, low_memory=False)
+        if len(frame) != int(csv_record.get("rows", -1)):
+            raise ValueError("projection row-count mismatch")
+        required = {
+            "projection_status",
+            "direct_senior_open_wc_plus_competitions",
+            "evidence_class",
+            "score_route",
+            "governing_calibration_intercept",
+            "governing_calibration_slope_per_100",
+            "zero_prior_calibration_intercept",
+            "zero_prior_calibration_slope_per_100",
+            "one_prior_calibration_intercept",
+            "one_prior_calibration_slope_per_100",
+            "base_calibration_intercept",
+            "calibration_slope_per_100",
+            "direct_youth_world_competitions",
+            "youth_world_projection_score",
+            "youth_world_projection_score_sd",
+            "youth_world_target_adjustment",
+            "youth_world_minus_wc_target_adjustment",
+        }
+        if not required.issubset(frame.columns):
+            raise ValueError("projection evidence-calibration schema mismatch")
+        available = frame.loc[
+            frame["projection_status"].eq(
+                "exploratory_current_reference_available"
+            )
+        ].copy()
+        counts = pd.to_numeric(
+            available["direct_senior_open_wc_plus_competitions"],
+            errors="raise",
+        )
+        expected_class = np.select(
+            [counts.eq(0), counts.eq(1)],
+            [
+                "zero_prior_senior_open_wc_plus",
+                "one_prior_senior_open_wc_plus",
+            ],
+            default="two_or_more_prior_senior_open_wc_plus",
+        )
+        expected_route = np.select(
+            [counts.eq(0), counts.eq(1)],
+            [
+                "wc_target_score_zero_prior_intercept_adjusted_link",
+                "wc_target_score_one_prior_intercept_adjusted_link",
+            ],
+            default="wc_target_score_standard_link",
+        )
+        if not np.array_equal(available["evidence_class"].to_numpy(), expected_class):
+            raise ValueError("projection evidence class does not match prior count")
+        if not np.array_equal(available["score_route"].to_numpy(), expected_route):
+            raise ValueError("projection score route does not match prior count")
+        expected_intercept = np.select(
+            [counts.eq(0), counts.eq(1)],
+            [float(zero_prior["intercept"]), float(one_prior["intercept"])],
+            default=float(calibration["intercept"]),
+        )
+        expected_slope = np.select(
+            [counts.eq(0), counts.eq(1)],
+            [float(zero_prior["slope_per_100"]), float(one_prior["slope_per_100"])],
+            default=clean_slope,
+        )
+        if not np.allclose(
+            pd.to_numeric(
+                available["governing_calibration_intercept"], errors="raise"
+            ),
+            expected_intercept,
+            rtol=0.0,
+            atol=1e-12,
+        ):
+            raise ValueError("projection governing intercept mismatch")
+        if not np.allclose(
+            pd.to_numeric(
+                available["governing_calibration_slope_per_100"], errors="raise"
+            ),
+            expected_slope,
+            rtol=0.0,
+            atol=1e-12,
+        ):
+            raise ValueError("projection governing slope mismatch")
+        constant_bindings = {
+            "zero_prior_calibration_intercept": float(zero_prior["intercept"]),
+            "zero_prior_calibration_slope_per_100": float(
+                zero_prior["slope_per_100"]
+            ),
+            "one_prior_calibration_intercept": float(one_prior["intercept"]),
+            "one_prior_calibration_slope_per_100": float(
+                one_prior["slope_per_100"]
+            ),
+            "base_calibration_intercept": float(calibration["intercept"]),
+            "calibration_slope_per_100": clean_slope,
+        }
+        for column, expected in constant_bindings.items():
+            if not np.allclose(
+                pd.to_numeric(available[column], errors="raise"),
+                expected,
+                rtol=0.0,
+                atol=1e-12,
+            ):
+                raise ValueError(f"projection constant binding mismatch: {column}")
+        metadata["verified"] = True
+        return frame, metadata
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as error:
+        return pd.DataFrame(), {"verified": False, "reason": str(error)}
 
 
 @st.cache_data(show_spinner=False, ttl=900, max_entries=2)
-def read_data() -> dict[str, pd.DataFrame]:
+def read_data() -> dict[str, object]:
     files = {
         "athletes": ("boulder_overview_athletes.parquet", "parquet"),
         "history": ("boulder_overview_history.parquet", "parquet"),
         "age_progression": ("boulder_age_progression_reference.csv", "csv"),
         "correlations": ("boulder_rating_correlations.csv", "csv"),
-        "calibration": ("boulder_elo_calibration.csv", "csv"),
         "rosters": ("program_rosters.csv", "csv"),
     }
-    output: dict[str, pd.DataFrame] = {}
+    output: dict[str, object] = {}
     for key, (filename, kind) in files.items():
         path = DATA / filename
         if not path.exists():
@@ -191,6 +485,9 @@ def read_data() -> dict[str, pd.DataFrame]:
             if kind == "parquet"
             else pd.read_csv(path, low_memory=False)
         )
+    projection, projection_metadata = load_current_wc_projection_artifact()
+    output["current_wc_projection"] = projection
+    output["current_wc_projection_metadata"] = projection_metadata
     safe_athletes, safe_history, fixture_audit = quarantine_obvious_fixture_exposure(
         output["athletes"], output["history"]
     )
@@ -493,14 +790,9 @@ def selected_rows(athletes: pd.DataFrame, selection_ids: list[str]) -> pd.DataFr
 
 def rating_help() -> str:
     return (
-        "Every displayed family uses the same anchor: 2000 means a fitted 50% "
-        "chance of reaching a semifinal at a randomly sampled 2025 IFSC Open "
-        "World Cup, within the athlete's gender pool. This shifts the scale for "
-        "interpretation without changing athlete order or model updates. Dashed "
-        "final, podium and win lines are fitted from the same frozen 2025 "
-        "athlete-starts; they are historical references, not current 2026 odds. "
-        "Global-ELO uses every de-duplicated Boulder result on one Open World-Cup "
-        "readiness scale. IFSC-ELO uses IFSC results only. WC+-ELO uses World Cups/"
+        "These rating families are diagnostic ledgers, not interchangeable "
+        "probability scales. Global-ELO uses every de-duplicated Boulder result. "
+        "IFSC-ELO uses IFSC results only. WC+-ELO uses World Cups/"
         "World Series, World Championships and Olympic-pathway events. The actual "
         "IFSC World Ranking remains a separate rank/points field. Specialist ratings are shown only "
         "with at least two eligible rounds and enough athletes to calibrate the "
@@ -614,163 +906,6 @@ def displacement_lines(
             )
 
 
-def outcome_threshold(
-    calibration: pd.DataFrame, outcome: str, pool: str = "Boulder_All"
-) -> float:
-    column = f"display_elo_at_50pct_{outcome}"
-    if calibration.empty or column not in calibration:
-        return np.nan
-    matched = calibration.loc[calibration["pool"].eq(pool), column]
-    if matched.notna().any():
-        return float(matched.dropna().iloc[0])
-    pool_rows = calibration.loc[
-        calibration["pool"].isin(["Boulder_Men", "Boulder_Women"]), column
-    ]
-    return float(pool_rows.mean()) if pool_rows.notna().any() else np.nan
-
-
-def calibrated_outcome_row(
-    calibration: pd.DataFrame, pool: object, outcome: str
-) -> pd.Series | None:
-    """Return one exact, usable 2025 gender-pool calibration row or abstain."""
-    if (
-        outcome not in OUTCOME_ORDER
-        or pool not in {"Boulder_Men", "Boulder_Women"}
-    ):
-        return None
-    threshold_column = f"display_elo_at_50pct_{outcome}"
-    slope_column = f"{outcome}_logistic_slope_per_100_native_elo"
-    required = {
-        "pool", "calibration_season", "calibration_competition",
-        threshold_column, slope_column,
-    }
-    if calibration.empty or not required.issubset(calibration.columns):
-        return None
-    season = pd.to_numeric(calibration["calibration_season"], errors="coerce")
-    matched = calibration.loc[
-        calibration["pool"].eq(pool)
-        & season.eq(CALIBRATION_SEASON)
-        & calibration["calibration_competition"].eq(CALIBRATION_COMPETITION)
-    ]
-    if len(matched) != 1:
-        return None
-    row = matched.iloc[0]
-    threshold = pd.to_numeric(pd.Series([row[threshold_column]]), errors="coerce").iloc[0]
-    slope = pd.to_numeric(pd.Series([row[slope_column]]), errors="coerce").iloc[0]
-    if not np.isfinite(threshold) or not np.isfinite(slope) or slope <= 0:
-        return None
-    return row
-
-
-def conditional_outcome_probability(
-    rating: object, calibration: pd.DataFrame, pool: object, outcome: str = "semifinal"
-) -> float | None:
-    """Return a conditional 2025-field outcome probability, or abstain safely.
-
-    The fitted curves are only valid for a qualification start in a randomly
-    sampled 2025 IFSC Open World Cup field mix.  They do not forecast entry,
-    selection, injury, or a specific event field.
-    """
-    numeric_rating = pd.to_numeric(pd.Series([rating]), errors="coerce").iloc[0]
-    row = calibrated_outcome_row(calibration, pool, outcome)
-    if row is None or not np.isfinite(numeric_rating):
-        return None
-    threshold = float(row[f"display_elo_at_50pct_{outcome}"])
-    slope = float(row[f"{outcome}_logistic_slope_per_100_native_elo"])
-    exponent = float(np.clip(slope * (numeric_rating - threshold) / 100.0, -700, 700))
-    return float(1.0 / (1.0 + np.exp(-exponent)))
-
-
-def conditional_outcome_projection(
-    rating: object,
-    rating_uncertainty: object,
-    calibration: pd.DataFrame,
-    pool: object,
-    outcome: str = "semifinal",
-) -> tuple[float, float, float] | None:
-    """Central curve probability plus the rating-state sensitivity at +/- one SD."""
-    uncertainty = pd.to_numeric(
-        pd.Series([rating_uncertainty]), errors="coerce"
-    ).iloc[0]
-    if not np.isfinite(uncertainty) or uncertainty < 0:
-        return None
-    central = conditional_outcome_probability(rating, calibration, pool, outcome)
-    lower = conditional_outcome_probability(
-        pd.to_numeric(pd.Series([rating]), errors="coerce").iloc[0] - uncertainty,
-        calibration,
-        pool,
-        outcome,
-    )
-    upper = conditional_outcome_probability(
-        pd.to_numeric(pd.Series([rating]), errors="coerce").iloc[0] + uncertainty,
-        calibration,
-        pool,
-        outcome,
-    )
-    if central is None or lower is None or upper is None:
-        return None
-    return central, min(lower, upper), max(lower, upper)
-
-
-def readiness_reference_level(
-    rating: object, calibration: pd.DataFrame, pool: object
-) -> str | None:
-    """Highest 2025 historical 50%-reference level met by the current rating."""
-    numeric_rating = pd.to_numeric(pd.Series([rating]), errors="coerce").iloc[0]
-    if not np.isfinite(numeric_rating):
-        return None
-    met: list[str] = []
-    for outcome in OUTCOME_ORDER:
-        row = calibrated_outcome_row(calibration, pool, outcome)
-        if row is None:
-            return None
-        threshold = float(row[f"display_elo_at_50pct_{outcome}"])
-        if numeric_rating >= threshold:
-            met.append(outcome)
-    if met:
-        return OUTCOME_LABELS[met[-1]]
-    return "Below semifinal"
-
-
-def format_rating_reference(value: object) -> str:
-    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
-    return f"{numeric:,.0f}" if np.isfinite(numeric) else "—"
-
-
-def format_probability_sensitivity(
-    projection: tuple[float, float, float] | None,
-) -> str:
-    if projection is None:
-        return "Not available"
-    central, lower, upper = projection
-
-    def display(value: float) -> str:
-        return f"{value:.1%}" if 0.0 < value < 0.01 else f"{value:.0%}"
-
-    return f"{display(central)} ({display(lower)}–{display(upper)})"
-
-
-def add_outcome_thresholds(
-    figure: go.Figure, calibration: pd.DataFrame
-) -> None:
-    styles = [
-        ("semifinal", "50% semifinal", "rgba(11,122,117,0.42)"),
-        ("final", "50% final", "rgba(66,133,169,0.42)"),
-        ("podium", "50% podium", "rgba(230,162,60,0.48)"),
-        ("win", "50% win", "rgba(242,107,91,0.46)"),
-    ]
-    for outcome, label, color in styles:
-        level = outcome_threshold(calibration, outcome)
-        if not np.isfinite(level):
-            continue
-        figure.add_hline(
-            y=level, line_dash="dash", line_width=1, line_color=color,
-            annotation_text=f"{label} · 2025",
-            annotation_position="top left",
-            annotation_font={"size": 10, "color": color.replace("0.4", "0.9")},
-        )
-
-
 def pool_scatter(
     frame: pd.DataFrame,
     x: str,
@@ -778,7 +913,6 @@ def pool_scatter(
     selected: list[str],
     title: str,
     canadian_outline: bool = False,
-    calibration: pd.DataFrame | None = None,
 ) -> go.Figure:
     plot = frame.dropna(subset=[x, rating]).copy()
     if plot.empty:
@@ -867,9 +1001,9 @@ def pool_scatter(
         )
     displacement_lines(figure, plot, rating, x)
     add_selected_highlight(figure, plot, selected, x, rating)
-    add_outcome_thresholds(
-        figure, calibration if calibration is not None else pd.DataFrame()
-    )
+    # Do not draw outcome thresholds here. The old pilot reused one 2025
+    # Global-ELO calibration across incompatible families; 2026 testing showed
+    # those lines were not calibrated current advancement probabilities.
     figure.update_layout(
         height=610,
         margin={"l": 88, "r": 36, "t": 76, "b": 138},
@@ -966,7 +1100,6 @@ def render_canadian_pool(
     athletes: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
-    calibration: pd.DataFrame,
 ) -> None:
     st.subheader("Canadian Pool")
     st.caption("Where every current Canadian CNR athlete sits, and what changes when the evidence becomes more competition-specific.")
@@ -981,7 +1114,6 @@ def render_canadian_pool(
     figure = pool_scatter(
         canadian, x, stage, selected,
         f"Canadian CNR athletes — {stage}",
-        calibration=calibration,
     )
     if x == "cnr_rank":
         figure.update_xaxes(autorange="reversed")
@@ -993,258 +1125,407 @@ def render_canadian_pool(
         st.caption(f"{missing} CNR athlete(s) are retained in the pool but cannot be plotted on {stage} yet because eligible evidence is missing.")
 
 
-def _projection_triplet_is_nested(
-    projections: dict[str, tuple[float, float, float] | None],
-    outcomes: tuple[str, ...],
-) -> bool:
-    """True when independent fitted curves keep their logical event ordering."""
-    values = [projections.get(outcome) for outcome in outcomes]
-    if any(value is None for value in values):
-        return False
-    assert all(value is not None for value in values)
-    return all(
-        values[index][position] >= values[index + 1][position]
-        for index in range(len(values) - 1)
-        for position in range(3)
-    )
-
-
-def _outcome_support(row: pd.Series | None, outcome: str) -> str:
-    if row is None:
-        return "—"
-    value = pd.to_numeric(
-        pd.Series([row.get(f"{outcome}_achievers", np.nan)]), errors="coerce"
-    ).iloc[0]
-    return f"{value:,.0f}" if np.isfinite(value) else "—"
-
-
-def projection_benchmark_labels(
-    projections: dict[str, tuple[float, float, float] | None],
-) -> dict[str, str]:
-    """Format only logically ordered historical benchmark mappings."""
-    nested_three = _projection_triplet_is_nested(
-        projections, ("semifinal", "final", "podium")
-    )
-    win_nested = nested_three and _projection_triplet_is_nested(
-        projections, ("podium", "win")
-    )
-    labels = {
-        outcome: (
-            format_probability_sensitivity(projections[outcome])
-            if nested_three
-            else CURVE_ORDER_UNAVAILABLE
-        )
-        for outcome in ("semifinal", "final", "podium")
-    }
-    labels["win"] = (
-        format_probability_sensitivity(projections["win"])
-        if win_nested
-        else SPARSE_WIN_UNAVAILABLE
-    )
-    return labels
-
-
-def wc_semifinal_rating_evidence(
-    athlete: pd.Series,
-) -> tuple[float, str, float, str]:
-    """Choose the most target-matched available Open-WC rating.
-
-    Specialist ledgers are already mapped and evidence-shrunk onto the public
-    Global-ELO display scale by the frozen rating-family builder. This hierarchy
-    changes the evidence lane, not the outcome calibration or its 2000 anchor.
-    """
-    for family in WC_SEMIFINAL_RATING_PRIORITY:
-        rating = pd.to_numeric(
-            pd.Series([athlete.get(family, np.nan)]), errors="coerce"
-        ).iloc[0]
-        if not np.isfinite(rating):
-            continue
-        evidence = pd.to_numeric(
-            pd.Series([athlete.get(f"{family} evidence", np.nan)]), errors="coerce"
-        ).iloc[0]
-        evidence_value = float(evidence) if np.isfinite(evidence) else np.nan
-        if evidence_value >= 8:
-            certainty = "Established ledger (8+ rounds)"
-        elif evidence_value >= 4:
-            certainty = "Developing ledger (4–7 rounds)"
-        elif evidence_value >= 2:
-            certainty = "Provisional ledger (2–3 rounds)"
-        else:
-            certainty = "Sparse fallback"
-        return float(rating), family, evidence_value, certainty
-    return np.nan, "Unavailable", np.nan, "Unavailable"
-
-
 def render_canadian_projection_pilot(
     athletes: pd.DataFrame,
     selected: list[str],
-    calibration: pd.DataFrame,
+    current_projection: pd.DataFrame,
+    projection_metadata: dict[str, object] | None = None,
 ) -> None:
-    """Show practical, conditional Open-WC benchmarks for chosen athletes."""
+    """Show the fixture-clean, form-and-target current WC pilot."""
     st.header("Canadian performance benchmark pilot")
     st.caption(
-        "Current quality and conditional World Cup benchmark estimates for the "
-        "selected athletes. Use the Canadian National Team proxy above for a "
-        "Canadian-only working set."
+        "Current form, target-specific quality and a conditional semifinal "
+        "benchmark for Canadian climbers."
     )
     st.info(
-        "2025 historical World Cup benchmark equivalency, conditional on starting "
-        "qualification in a comparable randomly sampled field mix. These are not "
-        "2026 event odds or attendance, selection, injury, advancement-path, or "
-        "specific-event forecasts.",
+        "Representative-2026-field estimate, conditional on starting. The score "
+        "uses all within-contest pairwise orderings, a 100-day form component and "
+        "WC-specific transfer. It is not an attendance, selection, injury or "
+        "route-style-specific forecast; a known entry list and route set should "
+        "replace the representative field for named-event guidance.",
         icon="ℹ️",
     )
     focus = selected_rows(athletes, selected).copy()
     if focus.empty:
         st.warning("No selected athlete has a matched Boulder rating snapshot.")
         return
+    selection_order = {selection_id: index for index, selection_id in enumerate(selected)}
+    focus["_selection_order"] = athlete_selection_ids(focus).map(selection_order)
+    focus = focus.sort_values("_selection_order", kind="stable")
+    if not projection_metadata or projection_metadata.get("verified") is not True:
+        reason = (
+            str(projection_metadata.get("reason", "unverified projection artifact"))
+            if projection_metadata
+            else "projection metadata is missing"
+        )
+        st.error(
+            "The fixture-clean current projection failed its artifact check: "
+            f"{reason}. The legacy probability curves are intentionally not used."
+        )
+        return
+    if current_projection.empty:
+        st.error(
+            "The fixture-clean current projection extract is missing. The old "
+            "2025 display curves are intentionally not used as a fallback."
+        )
+        return
+    required = {
+        "athlete_id", "pool", "projection_status", "wc_projection_score",
+        "wc_projection_score_sd", "wc_projection_score_sd_source", "score_route",
+        "evidence_class", "governing_calibration_slope_per_100",
+        "model_provisional", "model_gate_anchored_events",
+        "model_gate_anchored_comparisons",
+        "model_gate_unique_anchored_opponents",
+        "form_adjustment_100d",
+        "wc_target_adjustment", "direct_wc_competitions",
+        "direct_senior_open_wc_plus_competitions",
+        "direct_youth_world_competitions",
+        "youth_world_target_adjustment",
+        "youth_world_minus_wc_target_adjustment",
+        "semifinal_probability_central",
+        "semifinal_probability_easiest_observed_field",
+        "semifinal_probability_hardest_observed_field",
+        "semifinal_probability_rating_state_low",
+        "semifinal_probability_rating_state_high",
+    }
+    if not required.issubset(current_projection.columns):
+        st.error("The current projection extract failed its schema check.")
+        return
+    available_source = current_projection.loc[
+        current_projection["projection_status"].eq(
+            "exploratory_current_reference_available"
+        ),
+        "wc_projection_score_sd_source",
+    ]
+    if not available_source.eq("wc_latent_readiness_sd").all():
+        st.error("The current projection extract has mixed uncertainty provenance.")
+        return
 
-    quality = pd.DataFrame({
-        "Athlete": focus["athlete_name"].map(friendly_name),
-        "Pool": focus.get("pool", pd.Series("", index=focus.index)).str.replace("Boulder_", "", regex=False),
-        "Country": focus.get("country", pd.Series("", index=focus.index)),
-        "All-source quality": focus.get("Global-ELO", pd.Series(np.nan, index=focus.index)),
-        "Open-WC quality": focus.get(
-            "WC+-ELO-Open", pd.Series(np.nan, index=focus.index)
-        ),
-        "Open-WC rounds": focus.get(
-            "WC+-ELO-Open evidence", pd.Series(np.nan, index=focus.index)
-        ),
-        "WC+ qualification quality": focus.get(
-            "WC+-ELO-Qualies", pd.Series(np.nan, index=focus.index)
-        ),
-        "WC+ qualification rounds": focus.get(
-            "WC+-ELO-Qualies evidence", pd.Series(np.nan, index=focus.index)
-        ),
-        "IFSC quality": focus.get("IFSC-ELO", pd.Series(np.nan, index=focus.index)),
-        "Canada-context quality": focus.get(
-            "canada_projection_all_evidence", pd.Series(np.nan, index=focus.index)
-        ),
-        "All-source rating-state SD proxy": focus.get(
-            "Global-ELO uncertainty", pd.Series(np.nan, index=focus.index)
-        ),
-        "All-source rounds": focus.get(
-            "Global-ELO evidence", pd.Series(np.nan, index=focus.index)
-        ),
-        "Status": focus.get("Global-ELO status", pd.Series("", index=focus.index)),
-        "World rank": focus.get("world_event_rank", pd.Series(np.nan, index=focus.index)),
-        "365-day change": focus.get("momentum", pd.Series(np.nan, index=focus.index)),
-    })
-    st.markdown("#### Current quality")
+    selected_projection = focus[["global_id", "pool", "athlete_name"]].merge(
+        current_projection,
+        left_on=["global_id", "pool"],
+        right_on=["athlete_id", "pool"],
+        how="left",
+        validate="one_to_one",
+        suffixes=("_overview", ""),
+    )
+    missing = selected_projection["projection_status"].isna()
+    if missing.any():
+        names = selected_projection.loc[missing, "athlete_name_overview"].map(
+            friendly_name
+        )
+        st.caption(
+            "No fixture-clean current WC state is available for: "
+            + ", ".join(names.astype(str))
+            + ". No legacy probability is substituted."
+        )
+    available = selected_projection.loc[
+        selected_projection["projection_status"].eq(
+            "exploratory_current_reference_available"
+        )
+    ].copy()
+    if available.empty:
+        st.warning("None of the selected athletes has an available current WC projection.")
+        return
+
+    def probability_text(value: object) -> str:
+        numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        return f"{numeric:.1%}" if np.isfinite(numeric) else "—"
+
+    cards = st.columns(min(3, len(available)))
+    for card, (_, row) in zip(cards, available.iterrows()):
+        central = probability_text(row["semifinal_probability_central"])
+        field_low = probability_text(row["semifinal_probability_hardest_observed_field"])
+        field_high = probability_text(row["semifinal_probability_easiest_observed_field"])
+        card.metric(friendly_name(row["athlete_name_overview"]), central)
+        card.caption(
+            f"Observed 2026 field-strength sensitivity: {field_low}–{field_high}"
+        )
+
+    def route_text(row: pd.Series) -> str:
+        senior_wc = pd.to_numeric(
+            pd.Series([row.get("direct_senior_open_wc_plus_competitions", np.nan)]),
+            errors="coerce",
+        ).iloc[0]
+        senior_wc_text = int(senior_wc) if np.isfinite(senior_wc) else 0
+        youth_world = pd.to_numeric(
+            pd.Series([row.get("direct_youth_world_competitions", np.nan)]),
+            errors="coerce",
+        ).iloc[0]
+        youth_text = (
+            f" · {int(youth_world)} Youth World competition(s)"
+            if np.isfinite(youth_world) and youth_world > 0
+            else ""
+        )
+        route = str(row.get("score_route", ""))
+        if route == "wc_target_score_standard_link":
+            return (
+                f"Direct Senior/Open WC+ · {senior_wc_text} competition(s)"
+                f"{youth_text}"
+            )
+        source = str(row.get("bridge_source_domain", "")).replace("_", " ")
+        pairs = pd.to_numeric(
+            pd.Series([row.get("bridge_paired_athletes")]), errors="coerce"
+        ).iloc[0]
+        pair_text = f" · {int(pairs)} connected athletes" if np.isfinite(pairs) else ""
+        source_text = f" · {source} bridge sensitivity{pair_text}" if source else ""
+        if route == "wc_target_score_zero_prior_intercept_adjusted_link":
+            prefix = "No prior Senior/Open WC+ · lower-baseline transfer link"
+        elif route == "wc_target_score_one_prior_intercept_adjusted_link":
+            prefix = "One prior Senior/Open WC+ · one-start transfer link"
+        else:
+            prefix = "Unrecognized evidence calibration"
+        return f"{prefix}{youth_text}{source_text}"
+
+    def graph_evidence_text(row: pd.Series) -> str:
+        events = pd.to_numeric(
+            pd.Series([row.get("model_gate_anchored_events")]), errors="coerce"
+        ).iloc[0]
+        opponents = pd.to_numeric(
+            pd.Series([row.get("model_gate_unique_anchored_opponents")]),
+            errors="coerce",
+        ).iloc[0]
+        status = "provisional" if bool(row.get("model_provisional")) else "established"
+        if not np.isfinite(events) or not np.isfinite(opponents):
+            return status.capitalize()
+        return f"{status.capitalize()} · {int(events)} connected events · {int(opponents)} opponents"
+
+    def projection_evidence_text(row: pd.Series) -> str:
+        senior_wc = pd.to_numeric(
+            pd.Series([row.get("direct_senior_open_wc_plus_competitions")]),
+            errors="coerce",
+        ).iloc[0]
+        if not np.isfinite(senior_wc) or senior_wc <= 0:
+            return "Very low absolute certainty · no Senior/Open WC+ history"
+        if senior_wc == 1:
+            return "Low absolute certainty · one Senior/Open WC+ competition"
+        if bool(row.get("model_provisional")):
+            return "Moderate target evidence · provisional connected state"
+        return "Higher target evidence · 2+ Senior/Open WC+ competitions"
+
+    table = pd.DataFrame(
+        {
+            "Athlete": available["athlete_name_overview"].map(friendly_name),
+            "Representative semifinal": available[
+                "semifinal_probability_central"
+            ].map(probability_text),
+            "Observed-field sensitivity": [
+                f"{probability_text(low)}–{probability_text(high)}"
+                for low, high in zip(
+                    available["semifinal_probability_hardest_observed_field"],
+                    available["semifinal_probability_easiest_observed_field"],
+                )
+            ],
+            "Rating-state sensitivity": [
+                f"{probability_text(low)}–{probability_text(high)}"
+                for low, high in zip(
+                    available["semifinal_probability_rating_state_low"],
+                    available["semifinal_probability_rating_state_high"],
+                )
+            ],
+            "Connected-source sensitivity": [
+                (
+                    probability_text(
+                        row.get("bridge_probability_evidence_class_sensitivity")
+                    )
+                    if str(row.get("evidence_class", "")).startswith(
+                        ("zero_prior_", "one_prior_")
+                    )
+                    else "—"
+                )
+                for _, row in available.iterrows()
+            ],
+            "Current WC score": available["wc_projection_score"],
+            "100-day form": available["form_adjustment_100d"],
+            "WC target adjustment": available["wc_target_adjustment"],
+            "Youth-World adjustment": available["youth_world_target_adjustment"],
+            "Evidence route": [route_text(row) for _, row in available.iterrows()],
+            "Connected evidence": [
+                graph_evidence_text(row) for _, row in available.iterrows()
+            ],
+            "Projection confidence": [
+                projection_evidence_text(row) for _, row in available.iterrows()
+            ],
+        }
+    )
+    st.markdown("#### Current target-specific semifinal benchmark")
     st.dataframe(
-        quality.style.format(
+        table.style.format(
             {
-                "All-source quality": "{:.0f}",
-                "Open-WC quality": "{:.0f}",
-                "Open-WC rounds": "{:.0f}",
-                "WC+ qualification quality": "{:.0f}",
-                "WC+ qualification rounds": "{:.0f}",
-                "IFSC quality": "{:.0f}",
-                "Canada-context quality": "{:.0f}",
-                "All-source rating-state SD proxy": "{:.0f}",
-                "All-source rounds": "{:.0f}",
-                "World rank": "{:.0f}",
-                "365-day change": "{:+.0f}",
+                "Current WC score": "{:.0f}",
+                "100-day form": "{:+.0f}",
+                "WC target adjustment": "{:+.0f}",
+                "Youth-World adjustment": "{:+.0f}",
             },
             na_rep="—",
         ),
         hide_index=True,
         width="stretch",
     )
-    st.caption(
-        "The primary semifinal mapping below uses target-matched Open-WC "
-        "evidence (WC+ first, then IFSC/global fallbacks). All-source and "
-        "Canada-context quality remain separate diagnostics. The displayed SD is "
-        "the available all-source rating-state proxy, not target-family uncertainty; "
-        "it excludes event, field, attendance, injury and calibration uncertainty."
-    )
 
-    projection_rows: list[dict[str, object]] = []
-    for _, athlete in focus.iterrows():
-        rating, family, evidence, evidence_support = wc_semifinal_rating_evidence(athlete)
-        all_source_rating = athlete.get("Global-ELO", np.nan)
-        qualification_rating = pd.to_numeric(
-            pd.Series([athlete.get("WC+-ELO-Qualies", np.nan)]), errors="coerce"
-        ).iloc[0]
-        uncertainty = athlete.get("Global-ELO uncertainty", np.nan)
-        pool = athlete.get("pool")
-        semifinal_projection = conditional_outcome_projection(
-            rating, uncertainty, calibration, pool, "semifinal"
+    all_available = current_projection.loc[
+        current_projection["projection_status"].eq(
+            "exploratory_current_reference_available"
         )
-        all_source_projection = conditional_outcome_projection(
-            all_source_rating, uncertainty, calibration, pool, "semifinal"
-        )
-        qualification_projection = conditional_outcome_projection(
-            qualification_rating, uncertainty, calibration, pool, "semifinal"
-        )
-        support_row = calibrated_outcome_row(calibration, pool, "semifinal")
-        semifinal_reference = outcome_threshold(calibration, "semifinal", pool)
-        target_label = (
-            format_probability_sensitivity(semifinal_projection)
-            if semifinal_projection is not None else "Unavailable"
-        )
-        all_source_label = (
-            format_probability_sensitivity(all_source_projection)
-            if all_source_projection is not None else "Unavailable"
-        )
-        qualification_label = (
-            format_probability_sensitivity(qualification_projection)
-            if qualification_projection is not None else "Unavailable"
-        )
-        transport_gap = (
-            float(rating) - float(all_source_rating)
-            if np.isfinite(rating) and np.isfinite(all_source_rating)
-            else np.nan
-        )
-        row: dict[str, object] = {
-            "Athlete": friendly_name(athlete.get("athlete_name")),
-            "Pool": str(pool).replace("Boulder_", ""),
-            "WC semifinal benchmark": target_label,
-            "Target evidence used": family,
-            "Included rounds": evidence,
-            "Target-family ledger status": evidence_support,
-            "Qualification-only sensitivity": qualification_label,
-            "Target vs all-source gap": (
-                f"{transport_gap:+.0f} Elo" if np.isfinite(transport_gap) else "—"
-            ),
-            "All-source sensitivity": all_source_label,
-            "Semifinal 50% reference": (
-                f"{format_rating_reference(semifinal_reference)} "
-                f"(n={_outcome_support(support_row, 'semifinal')})"
-            ),
-        }
-        projection_rows.append(row)
-    st.markdown("#### Target-matched World Cup semifinal benchmark")
-    projection_table = pd.DataFrame(projection_rows)
-    st.dataframe(
-        projection_table.style.format({"Included rounds": "{:.0f}"}, na_rep="—"),
-        hide_index=True,
-        width="stretch",
+    ].copy()
+    all_available["_cnr_rank"] = pd.to_numeric(
+        all_available.get("cnr_rank"), errors="coerce"
     )
+    all_available = all_available.sort_values(
+        ["pool", "_cnr_rank", "athlete_name"], kind="stable", na_position="last"
+    )
+    all_table = pd.DataFrame(
+        {
+            "Athlete": all_available["athlete_name"].map(friendly_name),
+            "Pool": all_available["pool"].map(
+                {"Boulder_Men": "Men", "Boulder_Women": "Women"}
+            ).fillna(all_available["pool"]),
+            "CNR rank": all_available["_cnr_rank"],
+            "Representative semifinal": all_available[
+                "semifinal_probability_central"
+            ].map(probability_text),
+            "100-day form": all_available["form_adjustment_100d"],
+            "Direct Senior/Open WC+ comps": all_available.get(
+                "direct_senior_open_wc_plus_competitions"
+            ),
+            "Youth World comps": all_available.get(
+                "direct_youth_world_competitions"
+            ),
+            "Evidence route": [
+                route_text(row) for _, row in all_available.iterrows()
+            ],
+            "Connected evidence": [
+                graph_evidence_text(row) for _, row in all_available.iterrows()
+            ],
+            "Projection confidence": [
+                projection_evidence_text(row) for _, row in all_available.iterrows()
+            ],
+        }
+    )
+    with st.expander(
+        f"All current Canadian projections ({len(all_table):,})", expanded=True
+    ):
+        st.dataframe(
+            all_table.style.format(
+                {
+                    "CNR rank": "{:.0f}",
+                    "100-day form": "{:+.0f}",
+                    "Direct Senior/Open WC+ comps": "{:.0f}",
+                    "Youth World comps": "{:.0f}",
+                },
+                na_rep="—",
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        unavailable_count = int(len(current_projection) - len(all_available))
+        if unavailable_count:
+            st.caption(
+                f"{unavailable_count:,} additional CNR identity cluster(s) remain "
+                "listed in the source roster but have no connected event-clean "
+                "current state; no legacy probability is substituted."
+            )
     st.caption(
-        "The primary percentage maps the most target-specific available Open-WC "
-        "rating to the frozen 2025 advancement curve; the bracket varies that rating "
-        "by the available all-source rating-state SD proxy. It is a model-conditional "
-        "benchmark, not a "
-        "named-event probability or full interval. The all-source value is retained "
-        "only as a transport sensitivity; qualification-only shows the matching "
-        "round-family sensitivity. When lanes disagree, the Open-WC lane "
-        "governs directional WC guidance and the absolute estimate remains "
-        "model-sensitive. Final/podium/win probabilities "
-        "are not inferred from the qualification-only lane."
+        "Observed-field sensitivity changes only the 2026 reference field. "
+        "Rating-state sensitivity varies the athlete score by one model SD; it "
+        "is not a full confidence interval and does not include illness or a "
+        "style-specific route set. Athletes with zero or one prior Senior/Open "
+        "WC+ competition use separate, cross-validated baselines while retaining "
+        "the full field-strength-weighted score slope. Youth and domestic evidence "
+        "retains its opponent graph. Youth Worlds has a separate context head, so "
+        "it can change shared ability through actual opponents without directly "
+        "granting a Senior-WC target adjustment. The newcomer baseline prevents "
+        "lower-pathway evidence from inheriting veteran advancement odds unchanged. "
+        "Retained senior local, provincial, national and NACS fields still "
+        "connect newcomers to established WC opponents inside the pairwise state. "
+        "A connected lower-tier→WC bridge remains visible as a sensitivity, not "
+        "as an arbitrary probability cap."
     )
     with st.expander("Validation status and how to use this pilot"):
+        calibration_meta = dict(projection_metadata.get("calibration", {}))
+        low_wc_meta = dict(
+            projection_metadata.get("low_wc_evidence_calibration", {})
+        )
+        zero_prior_meta = dict(low_wc_meta.get("zero_prior", {}))
+        one_prior_meta = dict(low_wc_meta.get("one_prior", {}))
+        validation_rows = int(calibration_meta.get("clean_2026_rows", 0))
+        validation_predicted = float(
+            calibration_meta.get("clean_2026_predicted_rate", np.nan)
+        )
+        validation_observed = float(
+            calibration_meta.get("clean_2026_observed_rate", np.nan)
+        )
+        validation_brier = float(calibration_meta.get("clean_2026_brier", np.nan))
+        validation_log_loss = float(
+            calibration_meta.get("clean_2026_log_loss", np.nan)
+        )
+        canadian_rows = int(calibration_meta.get("clean_2026_canadian_rows", 0))
+        canadian_predicted = float(
+            calibration_meta.get("clean_2026_canadian_predicted_rate", np.nan)
+        )
+        canadian_observed = float(
+            calibration_meta.get("clean_2026_canadian_observed_rate", np.nan)
+        )
+        low_rows = int(low_wc_meta.get("clean_2026_rows", 0))
+        low_positives = int(low_wc_meta.get("clean_2026_positives", 0))
+        low_predicted = float(
+            low_wc_meta.get("clean_2026_predicted_rate", np.nan)
+        )
+        low_observed = float(
+            low_wc_meta.get("clean_2026_observed_rate", np.nan)
+        )
+        zero_rows = int(zero_prior_meta.get("clean_2026_rows", 0))
+        zero_positives = int(zero_prior_meta.get("clean_2026_positives", 0))
+        zero_predicted = float(
+            zero_prior_meta.get("clean_2026_predicted_rate", np.nan)
+        )
+        zero_observed = float(
+            zero_prior_meta.get("clean_2026_observed_rate", np.nan)
+        )
+        one_rows = int(one_prior_meta.get("clean_2026_rows", 0))
+        one_positives = int(one_prior_meta.get("clean_2026_positives", 0))
+        one_predicted = float(
+            one_prior_meta.get("clean_2026_predicted_rate", np.nan)
+        )
+        one_observed = float(
+            one_prior_meta.get("clean_2026_observed_rate", np.nan)
+        )
         st.markdown(
-            "- **WC+: supported** for the restricted realized-field "
-            "`joint_rank_stable` pair/rank diagnostic (five events). It does not "
-            "validate these 2025 outcome curves or forecast a particular field.\n"
-            "- **Canadian:** proper scores were strongly improved, but the central "
-            "50% interval was conservative; use the displayed sensitivity rather "
-            "than treating it as a calibrated interval.\n"
-            "- **NACS:** insufficient evidence (two events), so no NACS readiness "
-            "claim is made here.\n"
-            f"- Frozen 2026 temporal-holdout artifact: `{FROZEN_2026_HOLDOUT_ARTIFACT}`. "
-            "Rating data are current through 2026-07-25."
+            "- The dependence-aware score uses all pairwise orderings but caps "
+            "each event's effective pair weight; one large youth field is not "
+            "hundreds of independent wins.\n"
+            "- Youth Worlds is isolated from the Senior-WC target head: all 5,752 "
+            "retained Youth-World rows still update shared ability through their "
+            "opponents, while zero directly update the Senior-WC context.\n"
+            "- The semifinal link was refit on the event-clean 2025 Open World "
+            f"Cup replay. On {validation_rows:,} untouched 2026 starts it predicted "
+            f"{validation_predicted:.1%} advancement versus {validation_observed:.1%} "
+            f"observed (Brier {validation_brier:.3f}; log loss "
+            f"{validation_log_loss:.3f}).\n"
+            f"- In the smaller Canadian 2026 subset (`n={canadian_rows:,}`), the "
+            f"same governing link predicted {canadian_predicted:.1%} versus "
+            f"{canadian_observed:.1%} observed. Treat this subgroup check as a "
+            "calibration warning, not a separate refit.\n"
+            "- Zero and one prior Senior/Open WC+ starts are calibrated separately "
+            "using only 2025 event-held-out selection. In untouched 2026, the "
+            f"zero-prior class had {zero_positives:,}/{zero_rows:,} semifinalists "
+            f"(predicted {zero_predicted:.1%}; observed {zero_observed:.1%}); the "
+            f"one-prior class had {one_positives:,}/{one_rows:,} (predicted "
+            f"{one_predicted:.1%}; observed {one_observed:.1%}). Combined, the "
+            f"low-evidence link predicted {low_predicted:.1%} versus "
+            f"{low_observed:.1%} over {low_rows:,} starts. The lower-baseline "
+            "links lower newcomer odds without flattening athlete-to-"
+            "athlete quality differences; neither is a hard probability cap.\n"
+            "- Form affects the current score, but the old `0.75 × momentum` "
+            "shortcut is not used; it worsened probability calibration.\n"
+            "- A chronological Youth-World/Senior/NACS pathway-residual bridge "
+            "was tested as an additional predictor. It slightly improved pairwise "
+            "ordering but slightly worsened held-event semifinal log loss, so it "
+            "remains a displayed sensitivity instead of being counted twice in the "
+            "central probability.\n"
+            f"- Independent 2026 temporal-holdout context (rank model, not the "
+            f"source of these probability coefficients): `{FROZEN_2026_HOLDOUT_ARTIFACT}`. "
+            "Current results run through 2026-07-25."
         )
 
 
@@ -1253,7 +1534,6 @@ def render_ifsc_pool(
     history: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
-    calibration: pd.DataFrame,
 ) -> None:
     st.subheader("IFSC Pool")
     st.caption("Canadians beside every 2025–2026 IFSC Boulder finalist; a black ring identifies Canada.")
@@ -1282,7 +1562,6 @@ def render_ifsc_pool(
         pool, x, stage, selected,
         f"Canadian CNR athletes and recent IFSC finalists — {stage}",
         canadian_outline=True,
-        calibration=calibration,
     )
     if x == "ifsc_rank":
         figure.update_xaxes(autorange="reversed")
@@ -1295,7 +1574,6 @@ def render_wr_pool(
     athletes: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
-    calibration: pd.DataFrame,
 ) -> None:
     st.subheader("WR Pool")
     st.caption("The current World Ranking top 40 plus every Canadian with a World Ranking start in the last 365 days.")
@@ -1310,7 +1588,6 @@ def render_wr_pool(
     figure = pool_scatter(
         pool, "world_event_rank", stage, selected,
         f"World Ranking pool — {stage}", canadian_outline=True,
-        calibration=calibration,
     )
     figure.update_xaxes(autorange="reversed", title="Current IFSC World Ranking")
     st.plotly_chart(figure, width="stretch", theme=None)
@@ -1337,7 +1614,6 @@ def render_wr_pool(
             title="WC+ rating distribution of current World Ranking participants",
         )
         comparison.update_traces(marker={"size": 10, "opacity": 0.65})
-        add_outcome_thresholds(comparison, calibration)
         comparison.update_layout(height=430, showlegend=False)
         st.plotly_chart(comparison, width="stretch", theme=None)
 
@@ -1362,7 +1638,6 @@ def render_progression(
     age_progression: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
-    calibration: pd.DataFrame,
 ) -> None:
     st.subheader("Global progression")
     st.caption("Compare athletes at the same age, then separate current level from the direction of travel.")
@@ -1394,7 +1669,7 @@ def render_progression(
         plot, x="age", y="Global-ELO", color="Age group", symbol="gender",
         hover_name="display_name",
         hover_data={"cnr_rank": True, "momentum": ":.1f", "country": True},
-        title="Current Canadian pathway — one Open World-readiness scale",
+        title="Current Canadian pathway — diagnostic all-result rating",
     )
     figure.update_traces(marker={"size": 10, "opacity": 0.65})
     add_selected_highlight(figure, plot, selected, "age", "Global-ELO")
@@ -1404,8 +1679,8 @@ def render_progression(
         value=True,
         help=(
             "Shows the mean Global-ELO of current CNR top-five athletes by age "
-            "band. Outcome references remain visible because they define the "
-            "shared 2025 interpretation scale."
+            "band. It is a descriptive pathway reference, not a World Cup "
+            "advancement threshold."
         ),
     )
     if show_lines:
@@ -1426,13 +1701,12 @@ def render_progression(
                         "width": 3, "dash": "dot",
                     },
                 ))
-    add_outcome_thresholds(figure, calibration)
     figure.update_layout(height=570, margin={"l": 20, "r": 20, "t": 70, "b": 20})
     st.plotly_chart(figure, width="stretch", theme=None)
     st.info(compare_text(cohort, selected, "Global-ELO", "Progression"), icon="↗️")
 
     projection_figure = progression_projection(
-        athletes, history, age_progression, selected, calibration
+        athletes, history, age_progression, selected
     )
     st.plotly_chart(projection_figure, width="stretch", theme=None)
     reviewed_rates = typical_age_progression(age_progression)
@@ -1449,7 +1723,6 @@ def render_progression(
         "Individual future projections are withheld. Observed rating histories "
         "remain visible while the professional forecast contract is validated."
     )
-    render_focus_hypotheses(athletes, history, selected, calibration)
     st.caption(correlation_note(correlations, "Global-ELO"))
 
 
@@ -1458,7 +1731,6 @@ def progression_projection(
     history: pd.DataFrame,
     age_progression: pd.DataFrame,
     selected: list[str],
-    calibration: pd.DataFrame,
 ) -> go.Figure:
     """Show observed histories while individual forecast use is unauthorized."""
 
@@ -1479,7 +1751,7 @@ def progression_projection(
         rows = rows_source.loc[
             rows_source["global_id"].eq(athlete["global_id"])
             & rows_source["pool"].eq(athlete["pool"])
-        ].sort_values("event_date")
+        ].dropna(subset=["rating_after"]).sort_values("event_date")
         if rows.empty:
             continue
         figure.add_trace(
@@ -1498,7 +1770,6 @@ def progression_projection(
             line_color="#555",
             annotation_text="Now",
         )
-    add_outcome_thresholds(figure, calibration)
     figure.update_layout(
         title=(
             "Observed Global-ELO; individual future projection withheld "
@@ -1600,33 +1871,6 @@ def centered_age_year(value: object) -> int | None:
         return None
     center = int(np.floor(numeric + 0.5))
     return center if 12 <= center <= 45 else None
-
-
-def render_focus_hypotheses(
-    athletes: pd.DataFrame,
-    history: pd.DataFrame,
-    selected: list[str],
-    calibration: pd.DataFrame,
-) -> None:
-    focus = selected_rows(athletes, selected)
-    rows = []
-    for _, athlete in focus.iterrows():
-        global_elo = athlete.get("Global-ELO", np.nan)
-        semi = outcome_threshold(calibration, "semifinal", athlete.get("pool"))
-        wr_starts = athlete.get("starts_365", np.nan)
-        momentum = athlete.get("momentum", 0.0)
-        if pd.isna(global_elo):
-            hypothesis = "Build a reliable competition baseline before choosing a pathway emphasis."
-        elif np.isfinite(semi) and global_elo >= semi - 100 and (pd.isna(wr_starts) or wr_starts < 3):
-            hypothesis = "Test targeted WR competition exposure; readiness appears close enough for the experience to be informative."
-        elif momentum > 35:
-            hypothesis = "Protect the improving training process; add WR starts selectively rather than chasing participation volume."
-        else:
-            hypothesis = "Prioritize raising repeatable performance; choose competitions that answer a specific readiness question."
-        rows.append({"Athlete": friendly_name(athlete["athlete_name"]), "Working hypothesis": hypothesis})
-    if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        st.caption("These are transparent decision hypotheses from rating level, recent change and WR exposure—not causal training prescriptions.")
 
 
 def render_olympics(
@@ -1809,26 +2053,29 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
             fixture_audit = data.get("fixture_quarantine", pd.DataFrame())
             if not fixture_audit.empty:
                 row = fixture_audit.iloc[0]
-                withheld_ids = int(row.get("withheld_athlete_ids", 0))
-                if withheld_ids:
+                exposed_ids = int(row.get("fixture_exposed_athlete_ids", 0))
+                if exposed_ids:
                     st.info(
                         "Source-semantic guard: "
-                        f"{withheld_ids:,} athlete identities touched by "
-                        f"{int(row.get('fixture_source_events', 0)):,} clearly labelled "
-                        "test/demo source events are withheld until their ratings are rebuilt. "
-                        "This stopgap removes direct exposure only. Indirect opponent effects "
-                        "may remain in later real events until a fixture-clean rating rebuild."
+                        f"{int(row.get('fixture_event_rows', 0)):,} rows across "
+                        f"{int(row.get('fixture_pool_event_keys', 0)):,} clearly labelled "
+                        "test/demo pool-event keys are removed from the legacy history view. "
+                        f"All identities remain selectable; legacy ELO diagnostics are blanked "
+                        f"for {exposed_ids:,} directly exposed identities. The current WC pilot "
+                        "is independently replayed from event-clean inputs."
                     )
-            calibration = data.get("calibration", pd.DataFrame())
-            if not calibration.empty:
-                combined = calibration.loc[calibration["pool"].eq("Boulder_All")]
-                counted = combined if not combined.empty else calibration
-                starts = int(counted["qualification_starts"].sum())
-                events = int(counted["events"].sum())
+            current_projection = data.get("current_wc_projection", pd.DataFrame())
+            if not current_projection.empty:
+                available = int(
+                    current_projection.get(
+                        "projection_status",
+                        pd.Series("", index=current_projection.index),
+                    ).eq("exploratory_current_reference_available").sum()
+                )
                 st.caption(
-                    f"Display scale checked: 2000 is the fitted 50% semifinal level "
-                    f"from {starts:,} pre-event athlete-starts across {events} "
-                    "gender-pool World Cup samples in 2025."
+                    f"Fixture-clean current WC pilot loaded for {available:,} "
+                    "Canadian identity clusters; legacy universal outcome "
+                    "thresholds are disabled."
                 )
             if not age_reference_ready:
                 st.warning(
@@ -1915,7 +2162,12 @@ def main() -> None:
         st.info("Select at least one athlete to begin.")
         st.stop()
     render_rating_detail(athletes, data["history"], selected)
-    render_canadian_projection_pilot(athletes, selected, data["calibration"])
+    render_canadian_projection_pilot(
+        athletes,
+        selected,
+        data["current_wc_projection"],
+        data.get("current_wc_projection_metadata"),
+    )
 
     st.header("Overview")
     section = st.segmented_control(
@@ -1926,19 +2178,17 @@ def main() -> None:
     )
     renderers = {
         "Canadian Pool": lambda: render_canadian_pool(
-            athletes, selected, data["correlations"], data["calibration"]
+            athletes, selected, data["correlations"]
         ),
         "IFSC Pool": lambda: render_ifsc_pool(
             athletes, data["history"], selected, data["correlations"],
-            data["calibration"],
         ),
         "WR Pool": lambda: render_wr_pool(
-            athletes, selected, data["correlations"], data["calibration"]
+            athletes, selected, data["correlations"]
         ),
         "Global progression": lambda: render_progression(
             athletes, data["history"], data["age_progression"],
             selected, data["correlations"],
-            data["calibration"],
         ),
         "Towards Olympics": lambda: render_olympics(athletes, selected, data["correlations"]),
     }

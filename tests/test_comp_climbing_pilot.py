@@ -1,59 +1,32 @@
 from __future__ import annotations
 
+import inspect
+import json
+from pathlib import Path
+import shutil
+import tempfile
 import unittest
 
 import numpy as np
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
+import comp_climbing_app as app_module
 from comp_climbing_app import (
     ALL_RATINGS,
-    CURVE_ORDER_UNAVAILABLE,
     RATING_ORDER,
-    SPARSE_WIN_UNAVAILABLE,
-    _projection_triplet_is_nested,
     athlete_selector_frame,
-    conditional_outcome_probability,
-    conditional_outcome_projection,
-    format_probability_sensitivity,
-    projection_benchmark_labels,
+    load_current_wc_projection_artifact,
+    pool_scatter,
+    progression_projection,
     quarantine_obvious_fixture_exposure,
+    render_progression,
+    render_wr_pool,
     selected_rows,
-    wc_semifinal_rating_evidence,
 )
 
 
 class CanadianPilotProjectionTests(unittest.TestCase):
-    @staticmethod
-    def _calibration() -> pd.DataFrame:
-        rows: list[dict[str, object]] = []
-        for pool in ("Boulder_Men", "Boulder_Women"):
-            row: dict[str, object] = {
-                "pool": pool,
-                "calibration_season": 2025,
-                "calibration_competition": "IFSC Open World Cups",
-            }
-            for index, outcome in enumerate(("semifinal", "final", "podium", "win")):
-                row[f"display_elo_at_50pct_{outcome}"] = 2000.0 + 100.0 * index
-                row[f"{outcome}_logistic_slope_per_100_native_elo"] = 1.0
-                row[f"{outcome}_achievers"] = 100 - 20 * index
-            rows.append(row)
-        return pd.DataFrame(rows)
-
-    def test_exact_gender_pool_midpoint_is_one_half(self) -> None:
-        calibration = self._calibration()
-        self.assertAlmostEqual(
-            conditional_outcome_probability(
-                2000.0, calibration, "Boulder_Men", "semifinal"
-            ),
-            0.5,
-        )
-        self.assertIsNone(
-            conditional_outcome_probability(
-                2000.0, calibration, "Boulder_All", "semifinal"
-            )
-        )
-
     def test_current_bundle_exposes_wc_plus_not_nonexistent_wr_elo(self) -> None:
         athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
         self.assertIn("WC+-ELO", RATING_ORDER)
@@ -78,98 +51,6 @@ class CanadianPilotProjectionTests(unittest.TestCase):
         self.assertIn("WC+-ELO", rating_control.options)
         self.assertNotIn("WR-ELO", rating_control.options)
 
-    def test_rating_state_sensitivity_is_ordered_and_bounded(self) -> None:
-        projection = conditional_outcome_projection(
-            2050.0, 75.0, self._calibration(), "Boulder_Women", "semifinal"
-        )
-        self.assertIsNotNone(projection)
-        assert projection is not None
-        central, lower, upper = projection
-        self.assertLessEqual(lower, central)
-        self.assertLessEqual(central, upper)
-        self.assertTrue(all(0.0 <= value <= 1.0 for value in projection))
-        self.assertEqual(
-            format_probability_sensitivity((0.003, 0.001, 0.008)),
-            "0.3% (0.1%–0.8%)",
-        )
-
-    def test_crossing_sparse_win_curve_is_suppressed(self) -> None:
-        nested = {
-            "semifinal": (0.80, 0.70, 0.90),
-            "final": (0.60, 0.50, 0.70),
-            "podium": (0.30, 0.20, 0.40),
-            "win": (0.35, 0.25, 0.45),
-        }
-        self.assertTrue(
-            _projection_triplet_is_nested(
-                nested, ("semifinal", "final", "podium")
-            )
-        )
-        self.assertFalse(
-            _projection_triplet_is_nested(nested, ("podium", "win"))
-        )
-        labels = projection_benchmark_labels(nested)
-        self.assertNotEqual(labels["semifinal"], CURVE_ORDER_UNAVAILABLE)
-        self.assertEqual(labels["win"], SPARSE_WIN_UNAVAILABLE)
-
-    def test_every_deployed_rating_is_ordered_or_suppressed(self) -> None:
-        athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
-        calibration = pd.read_csv("data/boulder_elo_calibration.csv")
-        eligible = athletes.dropna(
-            subset=["Global-ELO", "Global-ELO uncertainty", "pool"]
-        )
-        self.assertGreater(len(eligible), 0)
-        checked = 0
-        outcomes = ("semifinal", "final", "podium", "win")
-        for pool in ("Boulder_Men", "Boulder_Women"):
-            subset = eligible.loc[eligible["pool"].eq(pool)]
-            rating = subset["Global-ELO"].to_numpy(dtype=float)
-            rating_sd = subset["Global-ELO uncertainty"].to_numpy(dtype=float)
-            curves: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
-            calibration_row = calibration.loc[calibration["pool"].eq(pool)].iloc[0]
-            for outcome in outcomes:
-                threshold = float(
-                    calibration_row[f"display_elo_at_50pct_{outcome}"]
-                )
-                slope = float(
-                    calibration_row[
-                        f"{outcome}_logistic_slope_per_100_native_elo"
-                    ]
-                )
-
-                def logistic(values: np.ndarray) -> np.ndarray:
-                    exponent = np.clip(slope * (values - threshold) / 100.0, -700, 700)
-                    return 1.0 / (1.0 + np.exp(-exponent))
-
-                curves[outcome] = (
-                    logistic(rating),
-                    logistic(rating - rating_sd),
-                    logistic(rating + rating_sd),
-                )
-            for index in range(len(subset)):
-                projections = {
-                    outcome: tuple(float(values[index]) for values in curves[outcome])
-                    for outcome in outcomes
-                }
-                labels = projection_benchmark_labels(projections)
-                first_three_nested = _projection_triplet_is_nested(
-                    projections, ("semifinal", "final", "podium")
-                )
-                win_nested = first_three_nested and _projection_triplet_is_nested(
-                    projections, ("podium", "win")
-                )
-                for outcome in ("semifinal", "final", "podium"):
-                    self.assertEqual(
-                        labels[outcome] == CURVE_ORDER_UNAVAILABLE,
-                        not first_three_nested,
-                    )
-                self.assertEqual(
-                    labels["win"] == SPARSE_WIN_UNAVAILABLE,
-                    not win_nested,
-                )
-                checked += 1
-        self.assertEqual(checked, len(eligible))
-
     def test_duplicate_names_select_only_the_stable_requested_record(self) -> None:
         frame = pd.DataFrame(
             {
@@ -192,11 +73,12 @@ class CanadianPilotProjectionTests(unittest.TestCase):
         self.assertEqual(chosen["global_id"].tolist(), ["CEC:595"])
         self.assertEqual(selected_rows(frame, ["CEC:595"])["global_id"].tolist(), ["CEC:595"])
 
-    def test_fixture_exposure_is_quarantined_per_identity_not_whole_field(self) -> None:
+    def test_fixture_events_are_removed_without_dropping_legitimate_identity_rows(self) -> None:
         athletes = pd.DataFrame(
             {
                 "global_id": ["CEC:1", "CEC:2"],
                 "cnr_rank": [1.0, 2.0],
+                "Global-ELO": [1900.0, 1800.0],
             }
         )
         history = pd.DataFrame(
@@ -205,15 +87,29 @@ class CanadianPilotProjectionTests(unittest.TestCase):
                 "event_name": ["Bouldering Test", "Real Nationals", "Real Nationals"],
                 "source_scope": ["CEC", "CEC", "CEC"],
                 "source_event_id": ["fixture", "real", "real"],
+                "rating_after": [1900.0, 1910.0, 1805.0],
             }
         )
         safe_athletes, safe_history, audit = quarantine_obvious_fixture_exposure(
             athletes, history
         )
-        self.assertEqual(safe_athletes["global_id"].tolist(), ["CEC:2"])
-        self.assertEqual(safe_history["global_id"].unique().tolist(), ["CEC:2"])
-        self.assertEqual(int(audit.iloc[0]["withheld_athlete_ids"]), 1)
-        self.assertEqual(int(audit.iloc[0]["withheld_canadian_rows"]), 1)
+        self.assertEqual(safe_athletes["global_id"].tolist(), ["CEC:1", "CEC:2"])
+        self.assertEqual(safe_history["global_id"].unique().tolist(), ["CEC:1", "CEC:2"])
+        self.assertTrue(pd.isna(safe_athletes.loc[0, "Global-ELO"]))
+        self.assertEqual(float(safe_athletes.loc[1, "Global-ELO"]), 1800.0)
+        self.assertTrue(
+            safe_history.loc[safe_history["global_id"].eq("CEC:1"), "rating_after"]
+            .isna()
+            .all()
+        )
+        self.assertEqual(
+            safe_history.loc[
+                safe_history["global_id"].eq("CEC:2"), "rating_after"
+            ].tolist(),
+            [1805.0],
+        )
+        self.assertEqual(int(audit.iloc[0]["fixture_exposed_athlete_ids"]), 1)
+        self.assertEqual(int(audit.iloc[0]["retained_canadian_identities"]), 1)
 
     def test_deployed_fixture_guard_has_exact_closed_effect(self) -> None:
         athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
@@ -224,14 +120,30 @@ class CanadianPilotProjectionTests(unittest.TestCase):
         row = audit.iloc[0]
         self.assertEqual(int(row["fixture_event_rows"]), 2041)
         self.assertEqual(int(row["fixture_source_events"]), 94)
-        self.assertEqual(int(row["withheld_athlete_ids"]), 731)
-        self.assertEqual(int(row["withheld_canadian_rows"]), 4)
+        self.assertEqual(int(row["fixture_pool_event_keys"]), 120)
+        self.assertEqual(int(row["fixture_exposed_athlete_ids"]), 731)
+        self.assertEqual(int(row["retained_canadian_identities"]), 4)
         self.assertFalse(
             safe_history["event_name"].astype(str).str.contains(
                 r"(?i)\b(?:test|mock|demo|dummy|sandbox|hidden)\b", regex=True
             ).any()
         )
-        self.assertEqual(len(athletes) - len(safe_athletes), 731)
+        self.assertEqual(len(athletes), len(safe_athletes))
+        exposed = safe_athletes["legacy_fixture_exposed"]
+        self.assertEqual(int(exposed.sum()), 731)
+        self.assertTrue(safe_athletes.loc[exposed, "Global-ELO"].isna().all())
+        exposed_history = safe_history["legacy_fixture_exposed"]
+        self.assertTrue(
+            safe_history.loc[
+                exposed_history,
+                [
+                    "rating_after",
+                    "rating_before",
+                    "event_start_rating",
+                    "performance_elo",
+                ],
+            ].isna().all().all()
+        )
 
     def test_deployed_colliding_names_are_exact_stable_choices(self) -> None:
         athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
@@ -243,36 +155,222 @@ class CanadianPilotProjectionTests(unittest.TestCase):
             chosen = selected_rows(athletes, [selection_id])
             self.assertEqual(chosen["global_id"].tolist(), [expected_global_id])
 
-    def test_named_wc_regression_uses_target_qualification_not_all_source(self) -> None:
-        athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
-        calibration = pd.read_csv("data/boulder_elo_calibration.csv")
-        by_id = athletes.set_index("global_id")
-        oscar = by_id.loc["IFSC:11847"]
-        matthew = by_id.loc["IFSC:14842"]
-        oscar_rating, oscar_family, oscar_evidence, _ = wc_semifinal_rating_evidence(oscar)
-        matthew_rating, matthew_family, matthew_evidence, _ = wc_semifinal_rating_evidence(matthew)
-        self.assertEqual(oscar_family, "WC+-ELO-Open")
-        self.assertEqual(matthew_family, "WC+-ELO-Open")
-        self.assertGreaterEqual(oscar_evidence, 8)
-        self.assertGreaterEqual(matthew_evidence, 8)
-        self.assertGreater(oscar_rating - matthew_rating, 75.0)
-        self.assertLess(float(oscar["Global-ELO"]), float(matthew["Global-ELO"]))
-        oscar_projection = conditional_outcome_projection(
-            oscar_rating,
-            float(oscar["Global-ELO uncertainty"]),
-            calibration,
-            str(oscar["pool"]),
-            "semifinal",
+    def test_diagnostic_charts_never_apply_universal_outcome_thresholds(self) -> None:
+        for function in (
+            pool_scatter,
+            render_wr_pool,
+            render_progression,
+            progression_projection,
+        ):
+            self.assertNotIn("add_outcome_thresholds(", inspect.getsource(function))
+
+        for legacy_symbol in (
+            "add_outcome_thresholds",
+            "conditional_outcome_probability",
+            "conditional_outcome_projection",
+            "wc_semifinal_rating_evidence",
+            "render_focus_hypotheses",
+        ):
+            self.assertFalse(hasattr(app_module, legacy_symbol), legacy_symbol)
+
+    def test_current_pairwise_form_target_named_regression(self) -> None:
+        projection = pd.read_csv(
+            "data/canadian_current_wc_projection_v3_youth_world_complete.csv"
         )
-        matthew_projection = conditional_outcome_projection(
-            matthew_rating,
-            float(matthew["Global-ELO uncertainty"]),
-            calibration,
-            str(matthew["pool"]),
-            "semifinal",
+        by_id = projection.set_index("athlete_id")
+        values = {
+            name: float(by_id.loc[athlete_id, "semifinal_probability_central"])
+            for name, athlete_id in {
+                "Oscar": "IFSC:11847",
+                "Matthew": "IFSC:14842",
+                "Hugo": "IFSC:1682",
+                "Dylan": "IFSC:17188",
+            }.items()
+        }
+        self.assertGreater(values["Oscar"], values["Matthew"])
+        self.assertGreater(values["Matthew"], values["Hugo"])
+        self.assertGreater(values["Hugo"], values["Dylan"])
+        self.assertGreater(values["Oscar"], 0.35)
+        self.assertLess(values["Dylan"], 0.02)
+        dylan = by_id.loc["IFSC:17188"]
+        self.assertEqual(
+            dylan["score_route"],
+            "wc_target_score_zero_prior_intercept_adjusted_link",
         )
-        assert oscar_projection is not None and matthew_projection is not None
-        self.assertGreater(oscar_projection[0], 2.0 * matthew_projection[0])
+        self.assertEqual(
+            dylan["evidence_class"], "zero_prior_senior_open_wc_plus"
+        )
+        self.assertLess(float(dylan["form_adjustment_100d"]), 0.0)
+        self.assertEqual(
+            int(dylan["direct_senior_open_wc_plus_competitions"]), 0
+        )
+        self.assertTrue(
+            np.isfinite(
+                float(dylan["bridge_probability_evidence_class_sensitivity"])
+            )
+        )
+        self.assertGreaterEqual(int(dylan["model_gate_anchored_events"]), 1)
+        self.assertGreaterEqual(
+            int(dylan["model_gate_unique_anchored_opponents"]), 1
+        )
+
+        available = projection.loc[
+            projection["projection_status"].eq(
+                "exploratory_current_reference_available"
+            )
+        ]
+        senior_wc = pd.to_numeric(
+            available["direct_senior_open_wc_plus_competitions"], errors="raise"
+        )
+        zero = available["score_route"].eq(
+            "wc_target_score_zero_prior_intercept_adjusted_link"
+        )
+        one = available["score_route"].eq(
+            "wc_target_score_one_prior_intercept_adjusted_link"
+        )
+        standard = available["score_route"].eq(
+            "wc_target_score_standard_link"
+        )
+        self.assertTrue((zero | one | standard).all())
+        self.assertTrue(senior_wc.loc[zero].eq(0).all())
+        self.assertTrue(senior_wc.loc[one].eq(1).all())
+        self.assertTrue(senior_wc.loc[standard].ge(2).all())
+        expected_evidence = np.select(
+            [senior_wc.eq(0), senior_wc.eq(1)],
+            [
+                "zero_prior_senior_open_wc_plus",
+                "one_prior_senior_open_wc_plus",
+            ],
+            default="two_or_more_prior_senior_open_wc_plus",
+        )
+        self.assertTrue(
+            np.array_equal(available["evidence_class"], expected_evidence)
+        )
+        governing_slope = pd.to_numeric(
+            available["governing_calibration_slope_per_100"], errors="raise"
+        )
+        self.assertTrue(governing_slope.gt(0.0).all())
+        self.assertAlmostEqual(
+            float(governing_slope.loc[zero].iloc[0]),
+            float(governing_slope.loc[standard].iloc[0]),
+            places=12,
+        )
+        self.assertTrue(
+            available["wc_projection_score_sd_source"]
+            .eq("wc_latent_readiness_sd")
+            .all()
+        )
+        self.assertTrue(
+            pd.to_numeric(
+                available["model_gate_anchored_events"], errors="raise"
+            ).gt(0).all()
+        )
+
+    def test_current_projection_artifact_is_bound_and_tamper_closed(self) -> None:
+        projection, metadata = load_current_wc_projection_artifact(Path("data"))
+        self.assertTrue(metadata.get("verified"))
+        self.assertFalse(projection.empty)
+        self.assertTrue(metadata["calibration"]["event_clean_refit"])
+        self.assertTrue(
+            metadata["low_wc_evidence_calibration"]["event_clean_refit"]
+        )
+        self.assertEqual(
+            metadata["low_wc_evidence_calibration"]["central_route"],
+            "separate_k0_k1_intercept_adjusted_links",
+        )
+        self.assertGreater(
+            metadata["low_wc_evidence_calibration"]["zero_prior"][
+                "slope_per_100"
+            ],
+            0.0,
+        )
+        self.assertIsNone(metadata["model"]["initializer_warm_start_sha256"])
+        routing = metadata["model"]["target_domain_routing"]
+        self.assertEqual(routing["schema"], "ifsc-youth-world-separate-target-head-v1")
+        self.assertEqual(routing["rows_routed"], 5752)
+        self.assertEqual(routing["source_events_routed"], 11)
+        self.assertEqual(routing["pool_events_routed"], 22)
+        self.assertEqual(routing["youth_world_rows_in_senior_wc_target_state"], 0)
+        self.assertTrue(routing["senior_open_world_major_preserved_in_wc_plus"])
+        post_cutoff = routing["post_cutoff_replay"]
+        self.assertEqual(post_cutoff["pool_events"], 6)
+        self.assertEqual(post_cutoff["athlete_events"], 1111)
+        self.assertEqual(post_cutoff["youth_world_events_in_wc_plus"], 0)
+        self.assertEqual(
+            post_cutoff["all_history_source_event_inventory_sha256"],
+            "28fe20328b6eb6c6ed8893a045ff2eea66940f3a4cd47aa83d70ac6daef9005a",
+        )
+        self.assertTrue(
+            metadata["claims"]["youth_world_shared_skill_graph_preserved"]
+        )
+        self.assertFalse(
+            metadata["claims"]["youth_world_directly_updates_senior_wc_offset"]
+        )
+        for evidence_class in ("zero_prior", "one_prior"):
+            self.assertEqual(
+                metadata["low_wc_evidence_calibration"][evidence_class][
+                    "slope_policy"
+                ],
+                "fixed_to_clean_base_slope",
+            )
+        self.assertFalse(
+            metadata["claims"]["rating_state_sensitivity_uses_bridge_sd"]
+        )
+        raw_athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
+        raw_history = pd.read_parquet("data/boulder_overview_history.parquet")
+        retained, _, _ = quarantine_obvious_fixture_exposure(
+            raw_athletes, raw_history
+        )
+        exposed_cnr_ids = set(
+            retained.loc[
+                retained["legacy_fixture_exposed"]
+                & pd.to_numeric(retained["cnr_rank"], errors="coerce").notna(),
+                "global_id",
+            ].astype(str)
+        )
+        self.assertEqual(len(exposed_cnr_ids), 4)
+        available_by_id = projection.set_index("athlete_id")["projection_status"]
+        self.assertTrue(exposed_cnr_ids.issubset(set(available_by_id.index)))
+        self.assertTrue(
+            available_by_id.loc[sorted(exposed_cnr_ids)]
+            .eq("exploratory_current_reference_available")
+            .all()
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in (
+                "canadian_current_wc_projection_v3_youth_world_complete.csv",
+                "canadian_current_wc_projection_v3_youth_world_complete.metadata.json",
+            ):
+                shutil.copy2(Path("data") / name, root / name)
+            with (
+                root / "canadian_current_wc_projection_v3_youth_world_complete.csv"
+            ).open(
+                "a", encoding="utf-8"
+            ) as destination:
+                destination.write("\n")
+            rejected, audit = load_current_wc_projection_artifact(root)
+            self.assertTrue(rejected.empty)
+            self.assertFalse(audit.get("verified"))
+            self.assertIn("hash mismatch", str(audit.get("reason")))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            csv_name = "canadian_current_wc_projection_v3_youth_world_complete.csv"
+            metadata_name = (
+                "canadian_current_wc_projection_v3_youth_world_complete.metadata.json"
+            )
+            shutil.copy2(Path("data") / csv_name, root / csv_name)
+            payload = json.loads((Path("data") / metadata_name).read_text(encoding="utf-8"))
+            payload["model"]["target_domain_routing"][
+                "youth_world_rows_in_senior_wc_target_state"
+            ] = 1
+            (root / metadata_name).write_text(json.dumps(payload), encoding="utf-8")
+            rejected, audit = load_current_wc_projection_artifact(root)
+            self.assertTrue(rejected.empty)
+            self.assertFalse(audit.get("verified"))
+            self.assertIn("routing closure", str(audit.get("reason")))
 
 
 if __name__ == "__main__":

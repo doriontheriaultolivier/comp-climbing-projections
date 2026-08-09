@@ -1,0 +1,1042 @@
+{
+  "schema": "canadian-current-wc-projection-public-metadata-v1",
+  "status": "exploratory_current_reference_not_exact_future_field",
+  "csv": {
+    "filename": "canadian_current_wc_projection_v3_youth_world_complete.csv",
+    "sha256": "82853469d16cc88912e0dd981ab9147702513dd78650012688e20f6b67d60636",
+    "bytes": 98102,
+    "rows": 86,
+    "available_rows": 82,
+    "columns": [
+      "athlete_id",
+      "athlete_name",
+      "pool",
+      "country",
+      "cnr_rank",
+      "cnr_value",
+      "identity_uncertainty_score",
+      "snapshot_at_utc",
+      "base_calibration_intercept",
+      "calibration_slope_per_100",
+      "zero_prior_calibration_intercept",
+      "zero_prior_calibration_slope_per_100",
+      "one_prior_calibration_intercept",
+      "one_prior_calibration_slope_per_100",
+      "calibration_lineage",
+      "conditionality_label",
+      "uncertainty_label",
+      "projection_status",
+      "wc_projection_score",
+      "wc_projection_score_sd",
+      "wc_projection_score_sd_source",
+      "score_route",
+      "evidence_class",
+      "governing_calibration_intercept",
+      "governing_calibration_slope_per_100",
+      "stable_component_mean",
+      "form_adjustment_100d",
+      "wc_target_adjustment",
+      "model_provisional",
+      "model_gate_anchored_events",
+      "model_gate_anchored_comparisons",
+      "model_gate_unique_anchored_opponents",
+      "model_gate_anchored_effective_weight",
+      "direct_wc_competitions",
+      "direct_senior_open_wc_plus_competitions",
+      "direct_youth_world_competitions",
+      "youth_world_projection_score",
+      "youth_world_projection_score_sd",
+      "youth_world_target_adjustment",
+      "youth_world_minus_wc_target_adjustment",
+      "bridge_source_domain",
+      "bridge_source_score",
+      "bridge_source_direct_competitions",
+      "bridge_wc_minus_source_median",
+      "bridge_paired_athletes",
+      "bridge_robust_sd",
+      "bridge_projection_score",
+      "bridge_projection_score_sd",
+      "raw_wc_parent_score",
+      "raw_wc_parent_probability_sensitivity",
+      "bridge_probability_base_calibration_sensitivity",
+      "bridge_probability_evidence_class_sensitivity",
+      "reference_field_events",
+      "reference_field_size_min",
+      "reference_field_size_median",
+      "reference_field_size_max",
+      "reference_field_cutoff_min",
+      "reference_field_cutoff_mean",
+      "reference_field_cutoff_max",
+      "semifinal_probability_central",
+      "semifinal_probability_easiest_observed_field",
+      "semifinal_probability_hardest_observed_field",
+      "semifinal_probability_rating_state_low",
+      "semifinal_probability_rating_state_high"
+    ]
+  },
+  "clean_input": {
+    "prepared_rows_sha256": "7fa294f3eff43312152d98ad762d7ab27e6b3660ca97f365f0c2dc8b05b8a58e",
+    "prepared_manifest_sha256": "25f2f05e63958bc93208ebb353bdf54cdae0d804dedbb51bd417b84b6d2500f2",
+    "source_rows": 179253,
+    "obvious_fixture_rows": 2041,
+    "obvious_fixture_source_events": 94,
+    "fixture_touched_identities": 732,
+    "fixture_touched_identities_with_legitimate_rows_preserved": 281,
+    "fixture_only_identities_without_legitimate_rows": 451,
+    "obvious_fixture_pool_event_keys": 120,
+    "rows_removed_for_flagged_event_keys": 2041,
+    "surviving_obvious_fixture_rows": 0,
+    "surviving_flagged_event_keys": 0,
+    "ambiguous_mixed_name_event_keys": 0,
+    "fixture_event_key_set_sha256": "c4256f8eb67af38dfd9283a6669263307f072f14699d87e5e8d953cc15cb8c70"
+  },
+  "model": {
+    "name": "joint_rank_form_target",
+    "snapshot_at_utc": "2026-08-08T00:00:00Z",
+    "producer_source_sha256": "c1637f2af09ba7c917a3206cc4ea6b068e08b9bdd18789d848ee158345b377d2",
+    "config": {
+      "display_scale": 400.0,
+      "prior_mean": 1800.0,
+      "prior_skill_sd": 480.0,
+      "minimum_skill_sd": 45.0,
+      "minimum_form_sd": 20.0,
+      "minimum_target_offset_sd": 15.0,
+      "maximum_skill_sd": 600.0,
+      "skill_drift_sd_per_year": 75.0,
+      "form_stationary_sd": 110.0,
+      "form_half_life_days": 100.0,
+      "enable_form": true,
+      "offset_prior_sd": 100.0,
+      "offset_half_life_days": 730.0,
+      "enable_target_offsets": true,
+      "event_performance_sd": 155.0,
+      "event_pair_weight_cap": 6.0,
+      "field_information_reference_opponents": 79,
+      "field_information_floor_fraction": 0.5,
+      "provisional_relative_shift_cap": 180.0,
+      "score_gap_weight": 0.0,
+      "score_gap_scale": 0.25,
+      "maximum_projection_shift": null,
+      "promotion_min_anchored_events": 2,
+      "promotion_min_anchored_comparisons": 8,
+      "promotion_min_unique_opponents": 6,
+      "promotion_min_effective_weight": 10.0,
+      "promotion_max_skill_sd": 160.0,
+      "target_domains": [
+        "wc+",
+        "ifsc_youth_world",
+        "ifsc_non_wc",
+        "canada_senior_national",
+        "canada_youth_national",
+        "nacs",
+        "provincial_local",
+        "other"
+      ],
+      "reference_domain": "other"
+    },
+    "config_sha256": "5fea26cf3d9ec4c542496e43474ab363d61a8efc25743a8383c839a4b695285b",
+    "initializer_states_sha256": "f5bed6f719e6b7e11c2f52e75b2469817a1c3b0fa24e489cf806b2b7312325d6",
+    "initializer_manifest_sha256": "4a48e09b67d96c00494658cdb7d7aacd37bff7e68b88b9427e488d00d4778966",
+    "initializer_converged": true,
+    "initializer_warm_start_sha256": null,
+    "replay_plan_sha256": "91d230d3eaa4eea144372e1a5e805219d9e5f37aa14361a59bfee88787f9fcaa",
+    "initializer_start_date_inclusive": "2021-01-01",
+    "initializer_cutoff_exclusive": "2024-01-01",
+    "target_domain_routing": {
+      "schema": "ifsc-youth-world-separate-target-head-v1",
+      "source_selector": "scope IFSC + age Youth + (tier World major youth OR anchored name IFSC World Youth Championships / World Climbing Youth Championship)",
+      "source_event_tiers_routed": [
+        "World major youth",
+        "International other youth"
+      ],
+      "initializer_routing_label": "IFSC youth world bridge",
+      "replay_target_domain": "ifsc_youth_world",
+      "senior_open_world_major_target_domain": "wc+",
+      "rows_routed": 5752,
+      "source_events_routed": 11,
+      "pool_events_routed": 22,
+      "mixed_target_batches": 0,
+      "youth_world_rows_in_senior_wc_target_state": 0,
+      "senior_open_world_major_preserved_in_wc_plus": true,
+      "athletes_with_youth_world_evidence": 2515,
+      "ranking_values_changed": 0,
+      "identity_values_changed": 0,
+      "graph_edges_removed": 0,
+      "parent_event_clean_rows_sha256": "21cd6592152779d78a4fb5b7bcc9cec0c3aa672ef99f12921f0ad6874af27d2d",
+      "parent_event_clean_manifest_sha256": "a7d6801b51de3113b3dc45bf0f35a6661a0bb2fe23f1d1cc878fbcd628c05388",
+      "post_cutoff_replay": {
+        "target_domain": "ifsc_youth_world",
+        "pool_events": 6,
+        "athlete_events": 1111,
+        "source_pool_events": 6,
+        "youth_world_events_in_wc_plus": 0,
+        "all_history_source_event_inventory_count": 11,
+        "all_history_source_event_inventory_sha256": "28fe20328b6eb6c6ed8893a045ff2eea66940f3a4cd47aa83d70ac6daef9005a",
+        "asserted_exact": true
+      }
+    }
+  },
+  "calibration": {
+    "calibration_event_shape": {
+      "2025_official_competitions": 6,
+      "2025_pool_events": 12,
+      "2025_qualification_starts": 858,
+      "2026_official_competitions": 5,
+      "2026_pool_events": 10,
+      "2026_qualification_starts": 811,
+      "asserted_exact": true
+    },
+    "clean_2025_leave_source_event": {
+      "brier": 0.12261169814723474,
+      "log_loss": 0.38198489551406506,
+      "observed_rate": 0.34265734265734266,
+      "positives": 294,
+      "predicted_rate": 0.3440707289848366,
+      "rows": 858
+    },
+    "clean_2025_leave_source_event_competition_balanced_log_loss": 0.3913273744485835,
+    "clean_2025_piecewise_leave_source_event": {
+      "brier": 0.11950626136943145,
+      "log_loss": 0.3737350115562706,
+      "observed_rate": 0.34265734265734266,
+      "positives": 294,
+      "predicted_rate": 0.3335259145599866,
+      "rows": 858
+    },
+    "clean_2026": {
+      "brier": 0.10906106467840232,
+      "log_loss": 0.34724929824878636,
+      "observed_rate": 0.29469790382244143,
+      "positives": 239,
+      "predicted_rate": 0.30735315206754366,
+      "rows": 811
+    },
+    "clean_2026_canadian_piecewise": {
+      "brier": 0.0785793366267558,
+      "log_loss": 0.2761554076900652,
+      "observed_rate": 0.13793103448275862,
+      "positives": 4,
+      "predicted_rate": 0.2070500578908789,
+      "rows": 29
+    },
+    "clean_2026_piecewise": {
+      "brier": 0.10558692928312015,
+      "log_loss": 0.333281958361533,
+      "observed_rate": 0.29469790382244143,
+      "positives": 239,
+      "predicted_rate": 0.30116737041841646,
+      "rows": 811
+    },
+    "event_clean_refit": true,
+    "field_anchor": "24th_highest_pre_event_joint_rank_form_target_score",
+    "fit_2025": {
+      "brier": 0.12135146020623089,
+      "log_loss": 0.37688121858325563,
+      "observed_rate": 0.34265734265734266,
+      "positives": 294,
+      "predicted_rate": 0.34265734265740155,
+      "rows": 858
+    },
+    "intercept": -0.052360778875031704,
+    "low_wc_evidence_calibration": {
+      "base_slope_reference_per_100": 0.7893047959112836,
+      "central_route": "separate_k0_k1_intercept_adjusted_links",
+      "class": "zero_or_one_prior_senior_open_wc_plus_competition",
+      "clean_2025_leave_source_event": {
+        "brier": 0.08728343362259973,
+        "log_loss": 0.2918946959607277,
+        "observed_rate": 0.09411764705882353,
+        "positives": 16,
+        "predicted_rate": 0.1041437735918806,
+        "rows": 170
+      },
+      "clean_2026_base_link": {
+        "brier": 0.07173635142290383,
+        "log_loss": 0.246440861537704,
+        "observed_rate": 0.04411764705882353,
+        "positives": 6,
+        "predicted_rate": 0.12614848187675798,
+        "rows": 136
+      },
+      "clean_2026_low_link": {
+        "brier": 0.051019264617213775,
+        "log_loss": 0.1631503273570976,
+        "observed_rate": 0.04411764705882353,
+        "positives": 6,
+        "predicted_rate": 0.08926121042497791,
+        "rows": 136
+      },
+      "event_clean_refit": true,
+      "fit_2025": {
+        "brier": 0.08351301843046716,
+        "log_loss": 0.2759915314298682,
+        "observed_rate": 0.09411764705882353,
+        "positives": 16,
+        "predicted_rate": 0.10261897476969861,
+        "rows": 170
+      },
+      "one_prior": {
+        "clean_2025_leave_source_event": {
+          "brier": 0.11281349827440859,
+          "log_loss": 0.36323175411163355,
+          "observed_rate": 0.14473684210526316,
+          "positives": 11,
+          "predicted_rate": 0.1546227616282189,
+          "rows": 76
+        },
+        "clean_2026_base_link": {
+          "brier": 0.07839727366833263,
+          "log_loss": 0.24290298878466546,
+          "observed_rate": 0.10344827586206896,
+          "positives": 6,
+          "predicted_rate": 0.1393567285712819,
+          "rows": 58
+        },
+        "clean_2026_class_link": {
+          "brier": 0.07794863130467686,
+          "log_loss": 0.24148571108510092,
+          "observed_rate": 0.10344827586206896,
+          "positives": 6,
+          "predicted_rate": 0.13665646357796765,
+          "rows": 58
+        },
+        "fit_2025": {
+          "brier": 0.1101220826618487,
+          "log_loss": 0.3464413427532089,
+          "observed_rate": 0.14473684210526316,
+          "positives": 11,
+          "predicted_rate": 0.15337166399725066,
+          "rows": 76
+        },
+        "intercept": -0.09337618286197209,
+        "prior_competitions": 1,
+        "shrinkage_tau": 0.25,
+        "slope_per_100": 0.7893047959112836,
+        "slope_policy": "fixed_to_clean_base_slope",
+        "tau_candidates": [
+          {
+            "brier": 0.11281349827440859,
+            "log_loss": 0.36323175411163355,
+            "tau": 0.25
+          },
+          {
+            "brier": 0.11453285165725993,
+            "log_loss": 0.37307811874978386,
+            "tau": 0.5
+          },
+          {
+            "brier": 0.11564161928173192,
+            "log_loss": 0.37961394756573685,
+            "tau": 0.75
+          },
+          {
+            "brier": 0.11626969546762164,
+            "log_loss": 0.38338865156795365,
+            "tau": 1.0
+          },
+          {
+            "brier": 0.11686009007319417,
+            "log_loss": 0.3869881318283101,
+            "tau": 1.5
+          },
+          {
+            "brier": 0.11710572918638944,
+            "log_loss": 0.3885009909990331,
+            "tau": 2.0
+          },
+          {
+            "brier": 0.11729658749524159,
+            "log_loss": 0.38968283487661504,
+            "tau": 3.0
+          },
+          {
+            "brier": 0.11739984439622575,
+            "log_loss": 0.39032458600301534,
+            "tau": 5.0
+          },
+          {
+            "brier": 0.11745969337153735,
+            "log_loss": 0.3906973180666298,
+            "tau": "infinite"
+          }
+        ],
+        "tau_selection": "minimum_2025_leave_source_event_class_log_loss",
+        "fit_2025_rows": 76,
+        "fit_2025_positives": 11,
+        "clean_2025_leave_event_log_loss": 0.36323175411163355,
+        "clean_2025_leave_event_brier": 0.11281349827440859,
+        "clean_2026_rows": 58,
+        "clean_2026_positives": 6,
+        "clean_2026_predicted_rate": 0.13665646357796765,
+        "clean_2026_observed_rate": 0.10344827586206896,
+        "clean_2026_log_loss": 0.24148571108510092,
+        "clean_2026_brier": 0.07794863130467686
+      },
+      "pooled_k_le_1_diagnostic": {
+        "clean_2025_leave_source_event": {
+          "brier": 0.09005473354881306,
+          "log_loss": 0.3088919872588598,
+          "observed_rate": 0.09411764705882353,
+          "positives": 16,
+          "predicted_rate": 0.09970244122129905,
+          "rows": 170
+        },
+        "clean_2026_low_link": {
+          "brier": 0.05717480517249224,
+          "log_loss": 0.19370193543665187,
+          "observed_rate": 0.04411764705882353,
+          "positives": 6,
+          "predicted_rate": 0.08389653019630729,
+          "rows": 136
+        },
+        "governing": false,
+        "intercept": -0.9368351821642406,
+        "shrinkage_tau": 1.0,
+        "tau_candidates": [
+          {
+            "brier": 0.09639252635455586,
+            "log_loss": 0.3175293256021196,
+            "tau": 0.25
+          },
+          {
+            "brier": 0.09213602821859276,
+            "log_loss": 0.31003903158626267,
+            "tau": 0.5
+          },
+          {
+            "brier": 0.09066506679763878,
+            "log_loss": 0.30890831051179,
+            "tau": 0.75
+          },
+          {
+            "brier": 0.09005473354881306,
+            "log_loss": 0.3088919872588598,
+            "tau": 1.0
+          },
+          {
+            "brier": 0.08958321163256543,
+            "log_loss": 0.3091519325082823,
+            "tau": 1.5
+          },
+          {
+            "brier": 0.08941083971808493,
+            "log_loss": 0.3093221583245558,
+            "tau": 2.0
+          },
+          {
+            "brier": 0.089285360525466,
+            "log_loss": 0.3094758472387148,
+            "tau": 3.0
+          },
+          {
+            "brier": 0.08922035677706146,
+            "log_loss": 0.3095661816885296,
+            "tau": 5.0
+          },
+          {
+            "brier": 0.08918356744231523,
+            "log_loss": 0.3096207282705775,
+            "tau": "infinite"
+          }
+        ],
+        "tau_selection": "minimum_2025_leave_source_event_low_class_log_loss"
+      },
+      "population_reconciliation": {
+        "explanation": "The legacy 195/17 population was not bound to this exact event-clean all-history Senior/Open wc+ evidence plan. The governing 170/16 result is recomputed here; the legacy count is non-governing and no causal fixture effect is claimed.",
+        "governing_event_clean_2025_positives": 16,
+        "governing_event_clean_2025_rows": 170,
+        "positive_delta": -1,
+        "prior_legacy_diagnostic_positives": 17,
+        "prior_legacy_diagnostic_rows": 195,
+        "row_delta": -25
+      },
+      "probability_cap": null,
+      "threshold": 1,
+      "zero_prior": {
+        "clean_2025_leave_source_event": {
+          "brier": 0.06664210475517977,
+          "log_loss": 0.23421792554084644,
+          "observed_rate": 0.05319148936170213,
+          "positives": 5,
+          "predicted_rate": 0.06333097475399002,
+          "rows": 94
+        },
+        "clean_2026_base_link": {
+          "brier": 0.0667833579583542,
+          "log_loss": 0.24907158743098906,
+          "observed_rate": 0.0,
+          "positives": 0,
+          "predicted_rate": 0.11632696510390679,
+          "rows": 78
+        },
+        "clean_2026_class_link": {
+          "brier": 0.0309948637470489,
+          "log_loss": 0.10490093945678747,
+          "observed_rate": 0.0,
+          "positives": 0,
+          "predicted_rate": 0.05401858628557527,
+          "rows": 78
+        },
+        "fit_2025": {
+          "brier": 0.061999306924243804,
+          "log_loss": 0.21903210950886934,
+          "observed_rate": 0.05319148936170213,
+          "positives": 5,
+          "predicted_rate": 0.061584885606997,
+          "rows": 94
+        },
+        "intercept": -1.827564084754898,
+        "prior_competitions": 0,
+        "shrinkage_tau": 1.5,
+        "slope_per_100": 0.7893047959112836,
+        "slope_policy": "fixed_to_clean_base_slope",
+        "tau_candidates": [
+          {
+            "brier": 0.08609358646236859,
+            "log_loss": 0.2818870606759343,
+            "tau": 0.25
+          },
+          {
+            "brier": 0.0767289405643849,
+            "log_loss": 0.2505354715310399,
+            "tau": 0.5
+          },
+          {
+            "brier": 0.07200174227385513,
+            "log_loss": 0.23861811530941465,
+            "tau": 0.75
+          },
+          {
+            "brier": 0.06933002255930669,
+            "log_loss": 0.23489953940254335,
+            "tau": 1.0
+          },
+          {
+            "brier": 0.06664210475517977,
+            "log_loss": 0.23421792554084644,
+            "tau": 1.5
+          },
+          {
+            "brier": 0.06544191582511266,
+            "log_loss": 0.2351594088180036,
+            "tau": 2.0
+          },
+          {
+            "brier": 0.06446836688052343,
+            "log_loss": 0.2366656569716222,
+            "tau": 3.0
+          },
+          {
+            "brier": 0.06392578705960597,
+            "log_loss": 0.23787130665293255,
+            "tau": 5.0
+          },
+          {
+            "brier": 0.06360616996112779,
+            "log_loss": 0.2387327378008871,
+            "tau": "infinite"
+          }
+        ],
+        "tau_selection": "minimum_2025_leave_source_event_class_log_loss",
+        "fit_2025_rows": 94,
+        "fit_2025_positives": 5,
+        "clean_2025_leave_event_log_loss": 0.23421792554084644,
+        "clean_2025_leave_event_brier": 0.06664210475517977,
+        "clean_2026_rows": 78,
+        "clean_2026_positives": 0,
+        "clean_2026_predicted_rate": 0.05401858628557527,
+        "clean_2026_observed_rate": 0.0,
+        "clean_2026_log_loss": 0.10490093945678747,
+        "clean_2026_brier": 0.0309948637470489
+      },
+      "fit_2025_rows": 170,
+      "fit_2025_positives": 16,
+      "clean_2025_leave_event_log_loss": 0.2918946959607277,
+      "clean_2025_leave_event_brier": 0.08728343362259973,
+      "clean_2026_rows": 136,
+      "clean_2026_positives": 6,
+      "clean_2026_predicted_rate": 0.08926121042497791,
+      "clean_2026_observed_rate": 0.04411764705882353,
+      "clean_2026_log_loss": 0.1631503273570976,
+      "clean_2026_brier": 0.051019264617213775
+    },
+    "schema": "event-clean-field-relative-semifinal-calibration-v1",
+    "slope_per_100": 0.7893047959112836,
+    "training_window": "2025_official_ifsc_senior_open_world_series",
+    "untouched_test_window": "2026_official_ifsc_senior_open_world_series",
+    "panel_sha256": "efed9e12f6520b41cfe5ad4a9ba923533df89729ce3f8d70c0ad67e9a14127fa",
+    "formula_base": "logit(p) = -0.052360778875031704 + 0.78930479591128355 * (score - field_24th_score) / 100",
+    "formula_zero_prior": "logit(p) = -1.827564084754898 + 0.78930479591128355 * (score - field_24th_score) / 100",
+    "formula_one_prior": "logit(p) = -0.093376182861972093 + 0.78930479591128355 * (score - field_24th_score) / 100",
+    "fit_2025_rows": 858,
+    "fit_2025_positives": 294,
+    "clean_2025_leave_event_log_loss": 0.38198489551406506,
+    "clean_2026_rows": 811,
+    "clean_2026_positives": 239,
+    "clean_2026_predicted_rate": 0.30116737041841646,
+    "clean_2026_observed_rate": 0.29469790382244143,
+    "clean_2026_log_loss": 0.333281958361533,
+    "clean_2026_brier": 0.10558692928312015,
+    "clean_2026_canadian_rows": 29,
+    "clean_2026_canadian_positives": 4,
+    "clean_2026_canadian_predicted_rate": 0.2070500578908789,
+    "clean_2026_canadian_observed_rate": 0.13793103448275862,
+    "clean_2026_canadian_log_loss": 0.2761554076900652,
+    "clean_2026_canadian_brier": 0.0785793366267558
+  },
+  "low_wc_evidence_calibration": {
+    "base_slope_reference_per_100": 0.7893047959112836,
+    "central_route": "separate_k0_k1_intercept_adjusted_links",
+    "class": "zero_or_one_prior_senior_open_wc_plus_competition",
+    "clean_2025_leave_source_event": {
+      "brier": 0.08728343362259973,
+      "log_loss": 0.2918946959607277,
+      "observed_rate": 0.09411764705882353,
+      "positives": 16,
+      "predicted_rate": 0.1041437735918806,
+      "rows": 170
+    },
+    "clean_2026_base_link": {
+      "brier": 0.07173635142290383,
+      "log_loss": 0.246440861537704,
+      "observed_rate": 0.04411764705882353,
+      "positives": 6,
+      "predicted_rate": 0.12614848187675798,
+      "rows": 136
+    },
+    "clean_2026_low_link": {
+      "brier": 0.051019264617213775,
+      "log_loss": 0.1631503273570976,
+      "observed_rate": 0.04411764705882353,
+      "positives": 6,
+      "predicted_rate": 0.08926121042497791,
+      "rows": 136
+    },
+    "event_clean_refit": true,
+    "fit_2025": {
+      "brier": 0.08351301843046716,
+      "log_loss": 0.2759915314298682,
+      "observed_rate": 0.09411764705882353,
+      "positives": 16,
+      "predicted_rate": 0.10261897476969861,
+      "rows": 170
+    },
+    "one_prior": {
+      "clean_2025_leave_source_event": {
+        "brier": 0.11281349827440859,
+        "log_loss": 0.36323175411163355,
+        "observed_rate": 0.14473684210526316,
+        "positives": 11,
+        "predicted_rate": 0.1546227616282189,
+        "rows": 76
+      },
+      "clean_2026_base_link": {
+        "brier": 0.07839727366833263,
+        "log_loss": 0.24290298878466546,
+        "observed_rate": 0.10344827586206896,
+        "positives": 6,
+        "predicted_rate": 0.1393567285712819,
+        "rows": 58
+      },
+      "clean_2026_class_link": {
+        "brier": 0.07794863130467686,
+        "log_loss": 0.24148571108510092,
+        "observed_rate": 0.10344827586206896,
+        "positives": 6,
+        "predicted_rate": 0.13665646357796765,
+        "rows": 58
+      },
+      "fit_2025": {
+        "brier": 0.1101220826618487,
+        "log_loss": 0.3464413427532089,
+        "observed_rate": 0.14473684210526316,
+        "positives": 11,
+        "predicted_rate": 0.15337166399725066,
+        "rows": 76
+      },
+      "intercept": -0.09337618286197209,
+      "prior_competitions": 1,
+      "shrinkage_tau": 0.25,
+      "slope_per_100": 0.7893047959112836,
+      "slope_policy": "fixed_to_clean_base_slope",
+      "tau_candidates": [
+        {
+          "brier": 0.11281349827440859,
+          "log_loss": 0.36323175411163355,
+          "tau": 0.25
+        },
+        {
+          "brier": 0.11453285165725993,
+          "log_loss": 0.37307811874978386,
+          "tau": 0.5
+        },
+        {
+          "brier": 0.11564161928173192,
+          "log_loss": 0.37961394756573685,
+          "tau": 0.75
+        },
+        {
+          "brier": 0.11626969546762164,
+          "log_loss": 0.38338865156795365,
+          "tau": 1.0
+        },
+        {
+          "brier": 0.11686009007319417,
+          "log_loss": 0.3869881318283101,
+          "tau": 1.5
+        },
+        {
+          "brier": 0.11710572918638944,
+          "log_loss": 0.3885009909990331,
+          "tau": 2.0
+        },
+        {
+          "brier": 0.11729658749524159,
+          "log_loss": 0.38968283487661504,
+          "tau": 3.0
+        },
+        {
+          "brier": 0.11739984439622575,
+          "log_loss": 0.39032458600301534,
+          "tau": 5.0
+        },
+        {
+          "brier": 0.11745969337153735,
+          "log_loss": 0.3906973180666298,
+          "tau": "infinite"
+        }
+      ],
+      "tau_selection": "minimum_2025_leave_source_event_class_log_loss",
+      "fit_2025_rows": 76,
+      "fit_2025_positives": 11,
+      "clean_2025_leave_event_log_loss": 0.36323175411163355,
+      "clean_2025_leave_event_brier": 0.11281349827440859,
+      "clean_2026_rows": 58,
+      "clean_2026_positives": 6,
+      "clean_2026_predicted_rate": 0.13665646357796765,
+      "clean_2026_observed_rate": 0.10344827586206896,
+      "clean_2026_log_loss": 0.24148571108510092,
+      "clean_2026_brier": 0.07794863130467686
+    },
+    "pooled_k_le_1_diagnostic": {
+      "clean_2025_leave_source_event": {
+        "brier": 0.09005473354881306,
+        "log_loss": 0.3088919872588598,
+        "observed_rate": 0.09411764705882353,
+        "positives": 16,
+        "predicted_rate": 0.09970244122129905,
+        "rows": 170
+      },
+      "clean_2026_low_link": {
+        "brier": 0.05717480517249224,
+        "log_loss": 0.19370193543665187,
+        "observed_rate": 0.04411764705882353,
+        "positives": 6,
+        "predicted_rate": 0.08389653019630729,
+        "rows": 136
+      },
+      "governing": false,
+      "intercept": -0.9368351821642406,
+      "shrinkage_tau": 1.0,
+      "tau_candidates": [
+        {
+          "brier": 0.09639252635455586,
+          "log_loss": 0.3175293256021196,
+          "tau": 0.25
+        },
+        {
+          "brier": 0.09213602821859276,
+          "log_loss": 0.31003903158626267,
+          "tau": 0.5
+        },
+        {
+          "brier": 0.09066506679763878,
+          "log_loss": 0.30890831051179,
+          "tau": 0.75
+        },
+        {
+          "brier": 0.09005473354881306,
+          "log_loss": 0.3088919872588598,
+          "tau": 1.0
+        },
+        {
+          "brier": 0.08958321163256543,
+          "log_loss": 0.3091519325082823,
+          "tau": 1.5
+        },
+        {
+          "brier": 0.08941083971808493,
+          "log_loss": 0.3093221583245558,
+          "tau": 2.0
+        },
+        {
+          "brier": 0.089285360525466,
+          "log_loss": 0.3094758472387148,
+          "tau": 3.0
+        },
+        {
+          "brier": 0.08922035677706146,
+          "log_loss": 0.3095661816885296,
+          "tau": 5.0
+        },
+        {
+          "brier": 0.08918356744231523,
+          "log_loss": 0.3096207282705775,
+          "tau": "infinite"
+        }
+      ],
+      "tau_selection": "minimum_2025_leave_source_event_low_class_log_loss"
+    },
+    "population_reconciliation": {
+      "explanation": "The legacy 195/17 population was not bound to this exact event-clean all-history Senior/Open wc+ evidence plan. The governing 170/16 result is recomputed here; the legacy count is non-governing and no causal fixture effect is claimed.",
+      "governing_event_clean_2025_positives": 16,
+      "governing_event_clean_2025_rows": 170,
+      "positive_delta": -1,
+      "prior_legacy_diagnostic_positives": 17,
+      "prior_legacy_diagnostic_rows": 195,
+      "row_delta": -25
+    },
+    "probability_cap": null,
+    "threshold": 1,
+    "zero_prior": {
+      "clean_2025_leave_source_event": {
+        "brier": 0.06664210475517977,
+        "log_loss": 0.23421792554084644,
+        "observed_rate": 0.05319148936170213,
+        "positives": 5,
+        "predicted_rate": 0.06333097475399002,
+        "rows": 94
+      },
+      "clean_2026_base_link": {
+        "brier": 0.0667833579583542,
+        "log_loss": 0.24907158743098906,
+        "observed_rate": 0.0,
+        "positives": 0,
+        "predicted_rate": 0.11632696510390679,
+        "rows": 78
+      },
+      "clean_2026_class_link": {
+        "brier": 0.0309948637470489,
+        "log_loss": 0.10490093945678747,
+        "observed_rate": 0.0,
+        "positives": 0,
+        "predicted_rate": 0.05401858628557527,
+        "rows": 78
+      },
+      "fit_2025": {
+        "brier": 0.061999306924243804,
+        "log_loss": 0.21903210950886934,
+        "observed_rate": 0.05319148936170213,
+        "positives": 5,
+        "predicted_rate": 0.061584885606997,
+        "rows": 94
+      },
+      "intercept": -1.827564084754898,
+      "prior_competitions": 0,
+      "shrinkage_tau": 1.5,
+      "slope_per_100": 0.7893047959112836,
+      "slope_policy": "fixed_to_clean_base_slope",
+      "tau_candidates": [
+        {
+          "brier": 0.08609358646236859,
+          "log_loss": 0.2818870606759343,
+          "tau": 0.25
+        },
+        {
+          "brier": 0.0767289405643849,
+          "log_loss": 0.2505354715310399,
+          "tau": 0.5
+        },
+        {
+          "brier": 0.07200174227385513,
+          "log_loss": 0.23861811530941465,
+          "tau": 0.75
+        },
+        {
+          "brier": 0.06933002255930669,
+          "log_loss": 0.23489953940254335,
+          "tau": 1.0
+        },
+        {
+          "brier": 0.06664210475517977,
+          "log_loss": 0.23421792554084644,
+          "tau": 1.5
+        },
+        {
+          "brier": 0.06544191582511266,
+          "log_loss": 0.2351594088180036,
+          "tau": 2.0
+        },
+        {
+          "brier": 0.06446836688052343,
+          "log_loss": 0.2366656569716222,
+          "tau": 3.0
+        },
+        {
+          "brier": 0.06392578705960597,
+          "log_loss": 0.23787130665293255,
+          "tau": 5.0
+        },
+        {
+          "brier": 0.06360616996112779,
+          "log_loss": 0.2387327378008871,
+          "tau": "infinite"
+        }
+      ],
+      "tau_selection": "minimum_2025_leave_source_event_class_log_loss",
+      "fit_2025_rows": 94,
+      "fit_2025_positives": 5,
+      "clean_2025_leave_event_log_loss": 0.23421792554084644,
+      "clean_2025_leave_event_brier": 0.06664210475517977,
+      "clean_2026_rows": 78,
+      "clean_2026_positives": 0,
+      "clean_2026_predicted_rate": 0.05401858628557527,
+      "clean_2026_observed_rate": 0.0,
+      "clean_2026_log_loss": 0.10490093945678747,
+      "clean_2026_brier": 0.0309948637470489
+    },
+    "fit_2025_rows": 170,
+    "fit_2025_positives": 16,
+    "clean_2025_leave_event_log_loss": 0.2918946959607277,
+    "clean_2025_leave_event_brier": 0.08728343362259973,
+    "clean_2026_rows": 136,
+    "clean_2026_positives": 6,
+    "clean_2026_predicted_rate": 0.08926121042497791,
+    "clean_2026_observed_rate": 0.04411764705882353,
+    "clean_2026_log_loss": 0.1631503273570976,
+    "clean_2026_brier": 0.051019264617213775
+  },
+  "reference_fields": [
+    {
+      "pool": "Boulder_Men",
+      "reference_field_events": 5,
+      "reference_field_size_min": 74,
+      "reference_field_size_median": 81.0,
+      "reference_field_size_max": 103,
+      "reference_field_cutoff_min": 2425.3356956986863,
+      "reference_field_cutoff_mean": 2437.816255001705,
+      "reference_field_cutoff_max": 2450.489369126898
+    },
+    {
+      "pool": "Boulder_Women",
+      "reference_field_events": 5,
+      "reference_field_size_min": 68,
+      "reference_field_size_median": 75.0,
+      "reference_field_size_max": 85,
+      "reference_field_cutoff_min": 2432.3875256727556,
+      "reference_field_cutoff_mean": 2445.052278524709,
+      "reference_field_cutoff_max": 2482.3480479305745
+    }
+  ],
+  "bridge_sensitivities": [
+    {
+      "pool": "Boulder_Men",
+      "source_domain": "nacs",
+      "paired_athletes": 18,
+      "wc_minus_source_median": -40.402806895243884,
+      "wc_minus_source_robust_sd": 45.0223391093418,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Men",
+      "source_domain": "canada_senior_national",
+      "paired_athletes": 11,
+      "wc_minus_source_median": -38.975782812016405,
+      "wc_minus_source_robust_sd": 43.742701737292194,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Men",
+      "source_domain": "ifsc_non_wc",
+      "paired_athletes": 251,
+      "wc_minus_source_median": -3.080742428952817,
+      "wc_minus_source_robust_sd": 25.690674758464297,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Men",
+      "source_domain": "ifsc_youth_world",
+      "paired_athletes": 77,
+      "wc_minus_source_median": -15.705409292109607,
+      "wc_minus_source_robust_sd": 27.713207306031855,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Men",
+      "source_domain": "canada_youth_national",
+      "paired_athletes": 3,
+      "wc_minus_source_median": -50.21367463107572,
+      "wc_minus_source_robust_sd": 13.348653622194083,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Women",
+      "source_domain": "nacs",
+      "paired_athletes": 13,
+      "wc_minus_source_median": -83.25077783379675,
+      "wc_minus_source_robust_sd": 54.01253278900149,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Women",
+      "source_domain": "canada_senior_national",
+      "paired_athletes": 6,
+      "wc_minus_source_median": -75.14665828963132,
+      "wc_minus_source_robust_sd": 53.28326591165551,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Women",
+      "source_domain": "ifsc_non_wc",
+      "paired_athletes": 192,
+      "wc_minus_source_median": -16.104436584121913,
+      "wc_minus_source_robust_sd": 35.26425825739559,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Women",
+      "source_domain": "ifsc_youth_world",
+      "paired_athletes": 71,
+      "wc_minus_source_median": -17.504147059406478,
+      "wc_minus_source_robust_sd": 45.18447119605172,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    },
+    {
+      "pool": "Boulder_Women",
+      "source_domain": "canada_youth_national",
+      "paired_athletes": 3,
+      "wc_minus_source_median": -96.40070953588838,
+      "wc_minus_source_robust_sd": 23.852688843083037,
+      "pair_rule": "accepted_model_promotion_boundary_at_least_two_direct_competitions_in_both_domains"
+    }
+  ],
+  "named_regressions": {
+    "ordered": "Oscar > Matthew > Hugo > Dylan",
+    "probabilities": {
+      "Oscar": 0.5781168634753507,
+      "Matthew": 0.14365193909140692,
+      "Hugo": 0.06673346163124057,
+      "Dylan": 0.004465105665418443
+    },
+    "dylan_route": "wc_target_score_zero_prior_intercept_adjusted_link",
+    "dylan_form_adjustment_100d": -28.81805164531445,
+    "zero_prior_route_rows": 63,
+    "one_prior_route_rows": 1,
+    "low_route_rows": 64,
+    "standard_route_rows": 18,
+    "route_evidence_invariant_violations": 0,
+    "rating_state_sd_source_invariant_violations": 0,
+    "fixture_event_identifiers_in_public_schema": 0
+  },
+  "claims": {
+    "attendance_forecast": false,
+    "exact_future_field_probability": false,
+    "historical_as_known": false,
+    "current_reference_projection": true,
+    "bridge_governs_central_probability": false,
+    "rating_state_sensitivity_uses_bridge_sd": false,
+    "whole_identity_fixture_penalty": false,
+    "youth_world_directly_updates_senior_wc_offset": false,
+    "youth_world_shared_skill_graph_preserved": true
+  }
+}
