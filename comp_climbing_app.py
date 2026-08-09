@@ -22,12 +22,12 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
-RATING_ORDER = ["Global-ELO", "IFSC-ELO", "WR-ELO"]
+RATING_ORDER = ["Global-ELO", "IFSC-ELO", "WC+-ELO"]
 FORMAT_OPTIONS = ["All formats", "Onsight", "Flash", "Scramble"]
 ALL_RATINGS = [
     "Global-ELO", "Global-ELO-Onsight", "Global-ELO-Scramble",
-    "Global-ELO-Flash", "WR-ELO", "WR-ELO-Qualies", "WR-ELO-Semies",
-    "WR-ELO-Finals", "IFSC-ELO", "IFSC-ELO-Qualies",
+    "Global-ELO-Flash", "WC+-ELO", "WC+-ELO-Open", "WC+-ELO-Qualies",
+    "WC+-ELO-Semies", "WC+-ELO-Finals", "IFSC-ELO", "IFSC-ELO-Qualies",
     "IFSC-ELO-Semies", "IFSC-ELO-Finals",
 ]
 DEFAULT_ATHLETES = ["Oscar Baudrand", "Matthew Rodriguez", "Colin Duffy"]
@@ -500,8 +500,9 @@ def rating_help() -> str:
         "final, podium and win lines are fitted from the same frozen 2025 "
         "athlete-starts; they are historical references, not current 2026 odds. "
         "Global-ELO uses every de-duplicated Boulder result on one Open World-Cup "
-        "readiness scale. IFSC-ELO uses IFSC results only. WR-ELO uses only events "
-        "that award IFSC World Ranking points. Specialist ratings are shown only "
+        "readiness scale. IFSC-ELO uses IFSC results only. WC+-ELO uses World Cups/"
+        "World Series, World Championships and Olympic-pathway events. The actual "
+        "IFSC World Ranking remains a separate rank/points field. Specialist ratings are shown only "
         "with at least two eligible rounds and enough athletes to calibrate the "
         "family; they shrink toward Global-ELO while evidence is limited. "
         "Performance-ELO is the posterior mean WC-level rating left plausible "
@@ -522,7 +523,7 @@ def rating_transform_controls(key: str, default: str) -> str:
         disabled=family != "Global-ELO",
         help=(
             "Format-specific ratings are available for the Global evidence pool. "
-            "IFSC and WR transformations already describe a narrower event pool."
+            "IFSC and WC+ transformations already describe a narrower event pool."
         ),
         key=f"{key}_format",
     )
@@ -534,18 +535,18 @@ def rating_transform_controls(key: str, default: str) -> str:
 def correlation_note(
     correlations: pd.DataFrame, family: str, pool: str | None = None
 ) -> str:
-    if correlations.empty or family == "WR-ELO":
-        return "WR-ELO is the reference scale in this view."
+    if correlations.empty or family == "WC+-ELO":
+        return "WC+-ELO is the highest-circuit rating reference in this view."
     rows = correlations.loc[correlations["rating_family"].eq(family)]
     if pool:
         rows = rows.loc[rows["pool"].eq(pool)]
     rows = rows.dropna(subset=["spearman_correlation"])
     if rows.empty:
-        return "Not enough paired evidence to report a stable relationship with WR-ELO."
+        return "Not enough paired evidence to report a stable relationship with WC+-ELO."
     value = float(np.average(rows["spearman_correlation"], weights=rows["athletes"]))
     n = int(rows["athletes"].sum())
     return (
-        f"Rank correlation with WR-ELO: {value:.2f} across {n} paired athlete-pools. "
+        f"Rank correlation with WC+-ELO: {value:.2f} across {n} paired athlete-pools. "
         "This shows association, not why the ratings differ; setting specificity, "
         "training environment, attendance, travel and selection remain mixed together."
     )
@@ -597,10 +598,10 @@ def displacement_lines(
     transitions = []
     if stage.startswith("Global-ELO-"):
         transitions.append(("Global-ELO", stage, "#9AA7A4"))
-    if stage in {"IFSC-ELO", "WR-ELO"}:
+    if stage in {"IFSC-ELO", "WC+-ELO"}:
         transitions.append(("Global-ELO", "IFSC-ELO", "#9AA7A4"))
-    if stage == "WR-ELO":
-        transitions.append(("IFSC-ELO", "WR-ELO", PALETTE["gold"]))
+    if stage == "WC+-ELO":
+        transitions.append(("IFSC-ELO", "WC+-ELO", PALETTE["gold"]))
     for start, end, color in transitions:
         subset = frame.dropna(subset=[x, start, end])
         for _, row in subset.iterrows():
@@ -947,6 +948,11 @@ def compare_text(
         suffix = (
             "Read this as an all-source rating gap, not the target-matched World "
             "Cup benchmark or a selection verdict."
+        )
+    elif context == "WR":
+        suffix = (
+            "Read this as a WC+ rating gap relative to this World Ranking pool, "
+            "not a projected placing or a selection verdict."
         )
     else:
         suffix = (
@@ -1300,7 +1306,7 @@ def render_wr_pool(
             & athletes["starts_365"].fillna(0).gt(0)
         )
     ].copy()
-    stage = rating_transform_controls("wr", "WR-ELO")
+    stage = rating_transform_controls("wr", "WC+-ELO")
     figure = pool_scatter(
         pool, "world_event_rank", stage, selected,
         f"World Ranking pool — {stage}", canadian_outline=True,
@@ -1322,13 +1328,13 @@ def render_wr_pool(
         default=defaults,
         max_selections=3,
     )
-    country_pool = pool.loc[pool["country"].isin(["CAN", *countries])].dropna(subset=["WR-ELO"])
+    country_pool = pool.loc[pool["country"].isin(["CAN", *countries])].dropna(subset=["WC+-ELO"])
     if not country_pool.empty:
         comparison = px.strip(
-            country_pool, x="country", y="WR-ELO", color="country",
+            country_pool, x="country", y="WC+-ELO", color="country",
             hover_name="display_name",
             hover_data={"world_event_rank": True, "starts_365": True},
-            title="Actual WR-ELO distribution of current participants",
+            title="WC+ rating distribution of current World Ranking participants",
         )
         comparison.update_traces(marker={"size": 10, "opacity": 0.65})
         add_outcome_thresholds(comparison, calibration)
@@ -1636,12 +1642,12 @@ def render_olympics(
         column.markdown(f"#### {friendly_name(athlete['athlete_name'])}")
         column.metric("Global-ELO", f"{athlete.get('Global-ELO', np.nan):.0f}" if pd.notna(athlete.get("Global-ELO")) else "—")
         column.metric("IFSC-ELO", f"{athlete.get('IFSC-ELO', np.nan):.0f}" if pd.notna(athlete.get("IFSC-ELO")) else "—")
-        column.metric("WR-ELO", f"{athlete.get('WR-ELO', np.nan):.0f}" if pd.notna(athlete.get("WR-ELO")) else "—")
+        column.metric("WC+-ELO", f"{athlete.get('WC+-ELO', np.nan):.0f}" if pd.notna(athlete.get("WC+-ELO")) else "—")
         rank = athlete.get("world_event_rank", np.nan)
         column.caption(f"Current World Ranking: {int(rank) if pd.notna(rank) else 'not ranked'} · starts/365d: {int(athlete.get('starts_365', 0) or 0)}")
     if not focus.empty:
         table = focus[[
-            "athlete_name", "Global-ELO", "IFSC-ELO", "WR-ELO",
+            "athlete_name", "Global-ELO", "IFSC-ELO", "WC+-ELO",
             "world_event_rank", "starts_365", "momentum",
         ]].copy()
         table["athlete_name"] = table["athlete_name"].map(friendly_name)
@@ -1942,7 +1948,7 @@ def main() -> None:
         st.write(rating_help())
         st.markdown(
             "- **Global-ELO-Onsight / Scramble / Flash:** only rounds with a confirmed procedure.\n"
-            "- **WR-ELO-Qualies / Semies / Finals:** only the named round of World Ranking events.\n"
+            "- **WC+-ELO-Qualies / Semies / Finals:** only the named round inside World Cup+, World Championship and Olympic-pathway events.\n"
             "- **IFSC-ELO-Qualies / Semies / Finals:** only the named round of non-para IFSC events.\n"
             "- **Performance-ELO:** the isolated level shown in one round, calculated from ratings frozen before the event."
         )

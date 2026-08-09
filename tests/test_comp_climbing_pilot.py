@@ -4,9 +4,12 @@ import unittest
 
 import numpy as np
 import pandas as pd
+from streamlit.testing.v1 import AppTest
 
 from comp_climbing_app import (
+    ALL_RATINGS,
     CURVE_ORDER_UNAVAILABLE,
+    RATING_ORDER,
     SPARSE_WIN_UNAVAILABLE,
     _projection_triplet_is_nested,
     athlete_selector_frame,
@@ -50,6 +53,30 @@ class CanadianPilotProjectionTests(unittest.TestCase):
                 2000.0, calibration, "Boulder_All", "semifinal"
             )
         )
+
+    def test_current_bundle_exposes_wc_plus_not_nonexistent_wr_elo(self) -> None:
+        athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
+        self.assertIn("WC+-ELO", RATING_ORDER)
+        self.assertIn("WC+-ELO", ALL_RATINGS)
+        self.assertNotIn("WR-ELO", RATING_ORDER)
+        self.assertNotIn("WR-ELO", ALL_RATINGS)
+        self.assertIn("WC+-ELO", athletes.columns)
+        self.assertGreater(int(athletes["WC+-ELO"].notna().sum()), 0)
+        # Legacy schema columns remain for compatibility, but contain no ratings.
+        self.assertEqual(int(athletes["WR-ELO"].notna().sum()), 0)
+
+    def test_world_ranking_view_uses_current_wc_plus_rating_family(self) -> None:
+        app = AppTest.from_file("comp_climbing_app.py", default_timeout=30).run()
+        app.segmented_control[2].set_value("WR Pool").run()
+        self.assertEqual(len(app.exception), 0)
+        rating_control = next(
+            control
+            for control in app.segmented_control
+            if control.label == "Rating evidence"
+        )
+        self.assertEqual(rating_control.value, "WC+-ELO")
+        self.assertIn("WC+-ELO", rating_control.options)
+        self.assertNotIn("WR-ELO", rating_control.options)
 
     def test_rating_state_sensitivity_is_ordered_and_bounded(self) -> None:
         projection = conditional_outcome_projection(
