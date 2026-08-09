@@ -467,6 +467,9 @@ def load_current_wc_projection_artifact(
 
 @st.cache_data(show_spinner=False, ttl=900, max_entries=2)
 def read_data() -> dict[str, object]:
+    # Bump this value whenever a byte-bound data artifact is replaced. Streamlit
+    # otherwise may retain the previous verification result until the TTL ends.
+    projection_cache_release = "v3-youth-world-complete-sealed-bytes"
     files = {
         "athletes": ("boulder_overview_athletes.parquet", "parquet"),
         "history": ("boulder_overview_history.parquet", "parquet"),
@@ -475,6 +478,7 @@ def read_data() -> dict[str, object]:
         "rosters": ("program_rosters.csv", "csv"),
     }
     output: dict[str, object] = {}
+    output["projection_cache_release"] = projection_cache_release
     for key, (filename, kind) in files.items():
         path = DATA / filename
         if not path.exists():
