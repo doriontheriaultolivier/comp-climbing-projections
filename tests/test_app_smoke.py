@@ -28,6 +28,124 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("Canadian Pool", [item.value for item in app.subheader])
         self.assertGreaterEqual(len(app.dataframe), 1)
 
+    def test_projection_interpretation_fields_and_named_regressions(self) -> None:
+        app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
+        app.run(timeout=120)
+        self.assertFalse(app.exception)
+        self.assertFalse(app.error)
+
+        metrics = {item.label: item.value for item in app.metric}
+        self.assertEqual(
+            {
+                "Oscar Baudrand": metrics["Oscar Baudrand"],
+                "Matthew Rodriguez": metrics["Matthew Rodriguez"],
+                "DORVAL Hugo": metrics["DORVAL Hugo"],
+            },
+            {
+                "Oscar Baudrand": "57.8%",
+                "Matthew Rodriguez": "14.4%",
+                "DORVAL Hugo": "6.7%",
+            },
+        )
+
+        for control, selection_id in zip(
+            app.selectbox[:3],
+            (
+                "Boulder_Men::CEC:3253",
+                "Boulder_Men::IFSC:18284",
+                "Boulder_Men::IFSC:1682",
+            ),
+        ):
+            control.set_value(selection_id)
+        app.run(timeout=120)
+        self.assertFalse(app.exception)
+        selected_metrics = {item.label: item.value for item in app.metric}
+        self.assertEqual(selected_metrics["SANTOPRETE Leonardo"], "8.2%")
+        self.assertEqual(selected_metrics["ARTEAU Nicolas"], "8.7%")
+        self.assertEqual(selected_metrics["DORVAL Hugo"], "6.7%")
+
+        projection_tables = [
+            element.value
+            for element in app.dataframe
+            if "Representative semifinal" in element.value.columns
+        ]
+        selected = next(table for table in projection_tables if len(table) == 3)
+        all_current = next(table for table in projection_tables if len(table) == 82)
+        self.assertEqual(
+            selected.columns[2:5].tolist(),
+            [
+                "Projection confidence",
+                "Rating-state sensitivity",
+                "Evidence route",
+            ],
+        )
+        self.assertEqual(
+            all_current.columns[4:7].tolist(),
+            [
+                "Projection confidence",
+                "Rating-state sensitivity",
+                "Evidence route",
+            ],
+        )
+        self.assertIn("Graph connectivity", selected.columns)
+        self.assertIn("Graph connectivity", all_current.columns)
+        self.assertNotIn("Connected evidence", selected.columns)
+        self.assertNotIn("Connected evidence", all_current.columns)
+
+        by_name = all_current.set_index("Athlete")
+        hugo = by_name.loc["DORVAL Hugo"]
+        self.assertEqual(hugo["Representative semifinal"], "6.7%")
+        self.assertEqual(hugo["Rating-state sensitivity"], "2.6%–16.3%")
+        self.assertEqual(int(hugo["Direct Senior/Open WC+ comps"]), 9)
+        self.assertIn("Higher target evidence", hugo["Projection confidence"])
+        self.assertNotIn("Indirect-to-WC", hugo["Graph connectivity"])
+
+        leonardo = by_name.loc["SANTOPRETE Leonardo"]
+        self.assertEqual(leonardo["Representative semifinal"], "8.2%")
+        self.assertEqual(leonardo["Rating-state sensitivity"], "1.0%–45.1%")
+        self.assertEqual(int(leonardo["Direct Senior/Open WC+ comps"]), 0)
+        self.assertIn("Very low absolute certainty", leonardo["Projection confidence"])
+        self.assertIn("Indirect-to-WC", leonardo["Graph connectivity"])
+        self.assertIn("provisional graph", leonardo["Graph connectivity"])
+
+        nicolas = by_name.loc["ARTEAU Nicolas"]
+        self.assertEqual(nicolas["Representative semifinal"], "8.7%")
+        self.assertEqual(nicolas["Rating-state sensitivity"], "2.0%–31.3%")
+        self.assertEqual(int(nicolas["Direct Senior/Open WC+ comps"]), 0)
+        self.assertIn("Very low absolute certainty", nicolas["Projection confidence"])
+        self.assertIn("Indirect-to-WC", nicolas["Graph connectivity"])
+        self.assertIn("established graph", nicolas["Graph connectivity"])
+
+        captions = [str(item.value) for item in app.caption]
+        self.assertIn("Rating-state sensitivity: 1.0%–45.1%", captions)
+        self.assertIn("Rating-state sensitivity: 2.0%–31.3%", captions)
+        self.assertIn("Rating-state sensitivity: 2.6%–16.3%", captions)
+        self.assertEqual(captions.count("Prior Senior/Open WC+: 0 competitions"), 2)
+        self.assertIn("Prior Senior/Open WC+: 9 competitions", captions)
+        self.assertTrue(
+            any(
+                caption.startswith(
+                    "Graph connectivity: Indirect-to-WC · provisional graph"
+                )
+                for caption in captions
+            )
+        )
+        self.assertTrue(
+            any(
+                caption.startswith(
+                    "Graph connectivity: Indirect-to-WC · established graph"
+                )
+                for caption in captions
+            )
+        )
+        self.assertTrue(
+            any(
+                "not head-to-head win probabilities or a firm ordering"
+                in caption
+                for caption in captions
+            )
+        )
+
     def test_progression_view(self) -> None:
         app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
         app.run(timeout=120)

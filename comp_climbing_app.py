@@ -1236,22 +1236,15 @@ def render_canadian_projection_pilot(
         numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
         return f"{numeric:.1%}" if np.isfinite(numeric) else "—"
 
-    cards = st.columns(min(3, len(available)))
-    for card, (_, row) in zip(cards, available.iterrows()):
-        central = probability_text(row["semifinal_probability_central"])
-        field_low = probability_text(row["semifinal_probability_hardest_observed_field"])
-        field_high = probability_text(row["semifinal_probability_easiest_observed_field"])
-        card.metric(friendly_name(row["athlete_name_overview"]), central)
-        card.caption(
-            f"Observed 2026 field-strength sensitivity: {field_low}–{field_high}"
-        )
-
-    def route_text(row: pd.Series) -> str:
-        senior_wc = pd.to_numeric(
+    def senior_open_wc_count(row: pd.Series) -> int:
+        value = pd.to_numeric(
             pd.Series([row.get("direct_senior_open_wc_plus_competitions", np.nan)]),
             errors="coerce",
         ).iloc[0]
-        senior_wc_text = int(senior_wc) if np.isfinite(senior_wc) else 0
+        return int(value) if np.isfinite(value) else 0
+
+    def route_text(row: pd.Series) -> str:
+        senior_wc_text = senior_open_wc_count(row)
         youth_world = pd.to_numeric(
             pd.Series([row.get("direct_youth_world_competitions", np.nan)]),
             errors="coerce",
@@ -1290,9 +1283,20 @@ def render_canadian_projection_pilot(
             errors="coerce",
         ).iloc[0]
         status = "provisional" if bool(row.get("model_provisional")) else "established"
+        indirect = str(row.get("score_route", "")) == (
+            "wc_target_score_zero_prior_intercept_adjusted_link"
+        )
+        prefix = (
+            f"Indirect-to-WC · {status} graph"
+            if indirect
+            else f"{status.capitalize()} graph"
+        )
         if not np.isfinite(events) or not np.isfinite(opponents):
-            return status.capitalize()
-        return f"{status.capitalize()} · {int(events)} connected events · {int(opponents)} opponents"
+            return prefix
+        return (
+            f"{prefix} · {int(events)} connected events · "
+            f"{int(opponents)} opponents"
+        )
 
     def projection_evidence_text(row: pd.Series) -> str:
         senior_wc = pd.to_numeric(
@@ -1307,24 +1311,67 @@ def render_canadian_projection_pilot(
             return "Moderate target evidence · provisional connected state"
         return "Higher target evidence · 2+ Senior/Open WC+ competitions"
 
+    cards = st.columns(min(3, len(available)))
+    for card, (_, row) in zip(cards, available.iterrows()):
+        central = probability_text(row["semifinal_probability_central"])
+        field_low = probability_text(
+            row["semifinal_probability_hardest_observed_field"]
+        )
+        field_high = probability_text(
+            row["semifinal_probability_easiest_observed_field"]
+        )
+        rating_low = probability_text(
+            row["semifinal_probability_rating_state_low"]
+        )
+        rating_high = probability_text(
+            row["semifinal_probability_rating_state_high"]
+        )
+        prior_wc = senior_open_wc_count(row)
+        prior_label = "competition" if prior_wc == 1 else "competitions"
+        card.metric(friendly_name(row["athlete_name_overview"]), central)
+        card.caption(
+            f"Observed 2026 field-strength sensitivity: {field_low}–{field_high}"
+        )
+        card.caption(f"Rating-state sensitivity: {rating_low}–{rating_high}")
+        card.caption(
+            f"Prior Senior/Open WC+: {prior_wc} {prior_label}"
+        )
+        card.caption(
+            f"Projection confidence: {projection_evidence_text(row)}"
+        )
+        card.caption(f"Evidence route: {route_text(row)}")
+        card.caption(f"Graph connectivity: {graph_evidence_text(row)}")
+    st.caption(
+        "These estimates are conditional semifinal scenarios for each athlete "
+        "against a reference field; they are not head-to-head win probabilities "
+        "or a firm ordering between athletes."
+    )
+
     table = pd.DataFrame(
         {
             "Athlete": available["athlete_name_overview"].map(friendly_name),
             "Representative semifinal": available[
                 "semifinal_probability_central"
             ].map(probability_text),
-            "Observed-field sensitivity": [
-                f"{probability_text(low)}–{probability_text(high)}"
-                for low, high in zip(
-                    available["semifinal_probability_hardest_observed_field"],
-                    available["semifinal_probability_easiest_observed_field"],
-                )
+            "Projection confidence": [
+                projection_evidence_text(row) for _, row in available.iterrows()
             ],
             "Rating-state sensitivity": [
                 f"{probability_text(low)}–{probability_text(high)}"
                 for low, high in zip(
                     available["semifinal_probability_rating_state_low"],
                     available["semifinal_probability_rating_state_high"],
+                )
+            ],
+            "Evidence route": [route_text(row) for _, row in available.iterrows()],
+            "Graph connectivity": [
+                graph_evidence_text(row) for _, row in available.iterrows()
+            ],
+            "Observed-field sensitivity": [
+                f"{probability_text(low)}–{probability_text(high)}"
+                for low, high in zip(
+                    available["semifinal_probability_hardest_observed_field"],
+                    available["semifinal_probability_easiest_observed_field"],
                 )
             ],
             "Connected-source sensitivity": [
@@ -1343,13 +1390,6 @@ def render_canadian_projection_pilot(
             "100-day form": available["form_adjustment_100d"],
             "WC target adjustment": available["wc_target_adjustment"],
             "Youth-World adjustment": available["youth_world_target_adjustment"],
-            "Evidence route": [route_text(row) for _, row in available.iterrows()],
-            "Connected evidence": [
-                graph_evidence_text(row) for _, row in available.iterrows()
-            ],
-            "Projection confidence": [
-                projection_evidence_text(row) for _, row in available.iterrows()
-            ],
         }
     )
     st.markdown("#### Current target-specific semifinal benchmark")
@@ -1388,6 +1428,22 @@ def render_canadian_projection_pilot(
             "Representative semifinal": all_available[
                 "semifinal_probability_central"
             ].map(probability_text),
+            "Projection confidence": [
+                projection_evidence_text(row) for _, row in all_available.iterrows()
+            ],
+            "Rating-state sensitivity": [
+                f"{probability_text(low)}–{probability_text(high)}"
+                for low, high in zip(
+                    all_available["semifinal_probability_rating_state_low"],
+                    all_available["semifinal_probability_rating_state_high"],
+                )
+            ],
+            "Evidence route": [
+                route_text(row) for _, row in all_available.iterrows()
+            ],
+            "Graph connectivity": [
+                graph_evidence_text(row) for _, row in all_available.iterrows()
+            ],
             "100-day form": all_available["form_adjustment_100d"],
             "Direct Senior/Open WC+ comps": all_available.get(
                 "direct_senior_open_wc_plus_competitions"
@@ -1395,15 +1451,6 @@ def render_canadian_projection_pilot(
             "Youth World comps": all_available.get(
                 "direct_youth_world_competitions"
             ),
-            "Evidence route": [
-                route_text(row) for _, row in all_available.iterrows()
-            ],
-            "Connected evidence": [
-                graph_evidence_text(row) for _, row in all_available.iterrows()
-            ],
-            "Projection confidence": [
-                projection_evidence_text(row) for _, row in all_available.iterrows()
-            ],
         }
     )
     with st.expander(
