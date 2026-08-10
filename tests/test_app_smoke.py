@@ -1,13 +1,67 @@
+import hashlib
+import json
 from pathlib import Path
 import unittest
 
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from comp_climbing_app import plain_key, selected_rows
+from comp_climbing_app import integer_observation, plain_key, selected_rows
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _stable_snapshot_value(value: object) -> object:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_stable_snapshot_value(item) for item in value]
+    return str(value)
+
+
+def _element_tree_sha256(app: AppTest) -> str:
+    manifest = []
+    for position, element in enumerate(app._tree):
+        proto = getattr(element, "proto", None)
+        serialize = getattr(proto, "SerializeToString", None)
+        if serialize is None:
+            continue
+        element_type = str(getattr(element, "type", type(element).__name__))
+        normalized = proto
+        if element_type == "dataframe" and hasattr(proto, "arrow_data"):
+            normalized = type(proto)()
+            normalized.CopyFrom(proto)
+            styler = normalized.arrow_data.styler
+            styler_uuid = str(styler.uuid)
+            if styler_uuid:
+                styler.styles = str(styler.styles).replace(
+                    f"#T_{styler_uuid}", "#T_STABLE"
+                )
+                styler.uuid = "STABLE"
+        payload = normalized.SerializeToString(deterministic=True)
+        manifest.append(
+            {
+                "position": position,
+                "type": element_type,
+                "key": _stable_snapshot_value(getattr(element, "key", None)),
+                "proto_type": str(proto.DESCRIPTOR.full_name),
+                "proto_sha256": hashlib.sha256(payload).hexdigest(),
+                "proto_bytes": len(payload),
+            }
+        )
+    encoded = json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _olympics_fixture_app(athletes, selected) -> None:
+    import pandas as fixture_pd
+
+    from comp_climbing_app import render_olympics
+
+    render_olympics(athletes, selected, fixture_pd.DataFrame())
 
 
 class AppSmokeTests(unittest.TestCase):
@@ -174,6 +228,112 @@ class AppSmokeTests(unittest.TestCase):
             )
             overview.set_value(section).run(timeout=120)
             self.assertFalse(app.exception, section)
+
+    def test_olympics_all_athlete_modes_and_default_tree_parity(self) -> None:
+        expected_captions = {
+            "Compare 3": [
+                "Current World Ranking: 27 · starts/365d: 4",
+                "Current World Ranking: 72 · starts/365d: 6",
+                "Current World Ranking: 54 · starts/365d: 6",
+            ],
+            "EEQ": [
+                "Current World Ranking: not recorded · starts/365d: not recorded",
+            ] * 3,
+            "YNT Tier 1": [
+                "Current World Ranking: not recorded · starts/365d: not recorded",
+            ] * 3,
+            "Canadian National Team proxy": [
+                "Current World Ranking: 27 · starts/365d: 4",
+                "Current World Ranking: not recorded · starts/365d: not recorded",
+                "Current World Ranking: not recorded · starts/365d: not recorded",
+            ],
+        }
+        for mode, expected in expected_captions.items():
+            with self.subTest(mode=mode):
+                app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
+                app.run(timeout=120)
+                if mode == "Compare 3":
+                    self.assertEqual(
+                        _element_tree_sha256(app),
+                        "76a54551901e12a39c900708741236236a900923f0152add22bbf555e2f6acff",
+                    )
+                else:
+                    next(
+                        item
+                        for item in app.segmented_control
+                        if item.label == "Athlete set"
+                    ).set_value(mode).run(timeout=120)
+                next(
+                    item
+                    for item in app.segmented_control
+                    if item.label == "Overview section"
+                ).set_value("Towards Olympics").run(timeout=120)
+                self.assertFalse(app.exception, mode)
+                self.assertFalse(app.error, mode)
+                captions = [
+                    str(item.value)
+                    for item in app.caption
+                    if "Current World Ranking:" in str(item.value)
+                ]
+                self.assertEqual(captions, expected)
+
+    def test_olympics_malformed_or_missing_integer_observations(self) -> None:
+        athletes = pd.DataFrame(
+            {
+                "pool": ["Boulder_Men"] * 3,
+                "global_id": ["TEST:1", "TEST:2", "TEST:3"],
+                "athlete_name": ["Missing", "Malformed", "Valid Zero"],
+                "Global-ELO": [1500.0, 1501.0, 1502.0],
+                "IFSC-ELO": [1400.0, 1401.0, 1402.0],
+                "WC+-ELO": [1300.0, 1301.0, 1302.0],
+                "world_event_rank": [None, "inf", "bad"],
+                "starts_365": [None, "bad", "0"],
+                "momentum": [0.0, 0.0, 0.0],
+            }
+        )
+        selected = [
+            "Boulder_Men::TEST:1",
+            "Boulder_Men::TEST:2",
+            "Boulder_Men::TEST:3",
+        ]
+        app = AppTest.from_function(
+            _olympics_fixture_app,
+            default_timeout=30,
+            args=(athletes, selected),
+        ).run()
+        self.assertFalse(app.exception)
+        self.assertFalse(app.error)
+        captions = [
+            str(item.value)
+            for item in app.caption
+            if "Current World Ranking:" in str(item.value)
+        ]
+        self.assertEqual(
+            captions,
+            [
+                "Current World Ranking: not recorded · starts/365d: not recorded",
+                "Current World Ranking: not recorded · starts/365d: not recorded",
+                "Current World Ranking: not recorded · starts/365d: 0",
+            ],
+        )
+
+    def test_integer_observation_rejects_non_counts(self) -> None:
+        cases = [
+            (None, "not recorded"),
+            (float("nan"), "not recorded"),
+            (float("inf"), "not recorded"),
+            ("bad", "not recorded"),
+            (-1, "not recorded"),
+            (1.5, "not recorded"),
+            (True, "not recorded"),
+            (0, "0"),
+            ("4.0", "4"),
+        ]
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(integer_observation(value), expected)
+        self.assertEqual(integer_observation(0, minimum=1), "not recorded")
+        self.assertEqual(integer_observation(1, minimum=1), "1")
 
     def test_selected_rows_uses_global_id_not_duplicate_display_name(self) -> None:
         frame = pd.DataFrame(

@@ -1072,11 +1072,12 @@ def compare_text(
             if np.isfinite(transport) else "Their IFSC-specific evidence is still incomplete. "
         )
     elif context == "WR":
-        rank = leader.get("world_event_rank", np.nan)
-        starts = leader.get("starts_365", np.nan)
+        rank = integer_observation(
+            leader.get("world_event_rank", np.nan), minimum=1
+        )
+        starts = integer_observation(leader.get("starts_365", np.nan))
         detail = (
-            f"Current World Ranking: {int(rank) if pd.notna(rank) else 'not ranked'} "
-            f"from {int(starts) if pd.notna(starts) else 0} eligible starts in 365 days. "
+            f"Current World Ranking: {rank} from {starts} eligible starts in 365 days. "
         )
     elif context == "Progression":
         detail = f"Their Global-ELO changed {leader.get('momentum', 0):+.0f} over the latest 365-day window. "
@@ -1924,6 +1925,29 @@ def centered_age_year(value: object) -> int | None:
     return center if 12 <= center <= 45 else None
 
 
+def integer_observation(
+    value: object,
+    *,
+    minimum: int = 0,
+    missing: str = "not recorded",
+) -> str:
+    """Format a count/rank without treating missing evidence as zero."""
+
+    if isinstance(value, (bool, np.bool_)):
+        return missing
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return missing
+    if (
+        not np.isfinite(numeric)
+        or numeric < minimum
+        or not numeric.is_integer()
+    ):
+        return missing
+    return str(int(numeric))
+
+
 def render_olympics(
     athletes: pd.DataFrame,
     selected: list[str],
@@ -1938,8 +1962,13 @@ def render_olympics(
         column.metric("Global-ELO", f"{athlete.get('Global-ELO', np.nan):.0f}" if pd.notna(athlete.get("Global-ELO")) else "—")
         column.metric("IFSC-ELO", f"{athlete.get('IFSC-ELO', np.nan):.0f}" if pd.notna(athlete.get("IFSC-ELO")) else "—")
         column.metric("WC+-ELO", f"{athlete.get('WC+-ELO', np.nan):.0f}" if pd.notna(athlete.get("WC+-ELO")) else "—")
-        rank = athlete.get("world_event_rank", np.nan)
-        column.caption(f"Current World Ranking: {int(rank) if pd.notna(rank) else 'not ranked'} · starts/365d: {int(athlete.get('starts_365', 0) or 0)}")
+        rank = integer_observation(
+            athlete.get("world_event_rank", np.nan), minimum=1
+        )
+        starts = integer_observation(athlete.get("starts_365", np.nan))
+        column.caption(
+            f"Current World Ranking: {rank} · starts/365d: {starts}"
+        )
     if not focus.empty:
         table = focus[[
             "athlete_name", "Global-ELO", "IFSC-ELO", "WC+-ELO",
