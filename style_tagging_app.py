@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from urllib import error as urlerror
+from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 import pandas as pd
@@ -150,6 +151,27 @@ def save_remotely(url: str, record: dict[str, object], image_bytes: bytes = b"")
         return False, f"Shared save failed: {exc}"
 
 
+def shared_records_url(url: str, limit: int = 100) -> str:
+    """Add the backend's read-only list action without assuming URL shape."""
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{urlparse.urlencode({'action': 'list', 'limit': limit})}"
+
+
+@st.cache_data(show_spinner=False, ttl=120, max_entries=1)
+def load_shared_records(url: str) -> tuple[list[dict[str, object]], str]:
+    """Read a bounded recent-tag list; an unavailable backend never blocks tagging."""
+    try:
+        with urlrequest.urlopen(shared_records_url(url), timeout=15) as response:
+            answer = json.loads(response.read().decode("utf-8"))
+        records = answer.get("records", [])
+        if not answer.get("ok") or not isinstance(records, list):
+            return [], str(answer.get("message", "Shared tag list is unavailable"))
+        clean_records = [item for item in records if isinstance(item, dict)]
+        return clean_records, ""
+    except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return [], f"Shared tag list is unavailable: {exc}"
+
+
 def main() -> None:
     st.set_page_config(page_title="Comp Climbing Boulder Tags", page_icon="B", layout="wide")
     st.title("Comp Climbing Boulder Tags")
@@ -243,6 +265,24 @@ def main() -> None:
         st.subheader("Current review records")
         st.dataframe(pd.DataFrame(records), hide_index=True, width="stretch")
         st.download_button("Download style-tag review JSON", json.dumps(records, indent=2), "comp_climbing_style_tags.json", "application/json")
+    url = backend_url()
+    if url:
+        st.divider()
+        st.subheader("Recent shared tags")
+        if st.button("Refresh shared tags"):
+            load_shared_records.clear()
+        shared, shared_error = load_shared_records(url)
+        if shared_error:
+            st.caption(shared_error)
+        elif shared:
+            visible = pd.DataFrame(shared)
+            preferred = [
+                "submitted_at_utc", "competition_date", "competition", "round",
+                "gender_terrain", "boulder", "confidence", "image_public_url",
+            ]
+            st.dataframe(visible[[column for column in preferred if column in visible]], hide_index=True, width="stretch")
+        else:
+            st.caption("No shared tags yet.")
 
 
 if __name__ == "__main__":

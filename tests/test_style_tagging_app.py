@@ -29,6 +29,16 @@ class StyleTaggingAppTest(unittest.TestCase):
         self.assertEqual(module.boulder_options("Men", "5.0"), ["M1", "M2", "M3", "M4", "M5"])
         self.assertEqual(module.boulder_options("Mixed / unknown", 4), [])
 
+    def test_shared_record_endpoint_preserves_existing_query_parameters(self) -> None:
+        self.assertEqual(
+            module.shared_records_url("https://example.test/exec", 25),
+            "https://example.test/exec?action=list&limit=25",
+        )
+        self.assertEqual(
+            module.shared_records_url("https://example.test/exec?token=public", 25),
+            "https://example.test/exec?token=public&action=list&limit=25",
+        )
+
     def test_loads_the_governed_route_demand_fields(self) -> None:
         fields = module.route_fields()
         self.assertIn("three_dimensionality_0_3", fields)
