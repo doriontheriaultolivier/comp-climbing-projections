@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -27,6 +28,20 @@ class StyleTaggingAppTest(unittest.TestCase):
         fields = module.route_fields()
         self.assertIn("three_dimensionality_0_3", fields)
         self.assertNotIn("volume_macro_density_0_3", fields)
+
+    def test_builds_a_schema_v2_record(self) -> None:
+        record = module.build_record(
+            competition="2026 Test Open", competition_date="2026-08-11", round_name="Final",
+            category="Women", boulder="W2", confidence="High", top_direction="Up",
+            zone_direction="Diagonal", core_values={field: (2, 1) for field in module.CORE_TAG_LABELS},
+            detailed_values={"crimp_edge_0_3": (3, 2)}, optional_tags_completed=True,
+        )
+        schema = json.loads((Path(__file__).parents[1] / "schemas" / "boulder_style_tag_schema_v2.json").read_text())
+        self.assertEqual(record["schema_version"], "2.0")
+        self.assertTrue(set(schema["required"]).issubset(record))
+        self.assertNotIn("route_tags", record)
+        self.assertEqual(record["top_crimp_edge_0_3"], 3)
+        self.assertEqual(record["zone_crimp_edge_0_3"], 2)
 
 
 if __name__ == "__main__":
