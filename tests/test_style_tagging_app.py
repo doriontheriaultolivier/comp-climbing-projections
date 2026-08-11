@@ -24,6 +24,11 @@ class StyleTaggingAppTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.canonical_boulder_label("B5")
 
+    def test_limits_known_rounds_to_the_source_boulder_count(self) -> None:
+        self.assertEqual(module.boulder_options("Women", 4), ["W1", "W2", "W3", "W4"])
+        self.assertEqual(module.boulder_options("Men", "5.0"), ["M1", "M2", "M3", "M4", "M5"])
+        self.assertEqual(module.boulder_options("Mixed / unknown", 4), [])
+
     def test_loads_the_governed_route_demand_fields(self) -> None:
         fields = module.route_fields()
         self.assertIn("three_dimensionality_0_3", fields)

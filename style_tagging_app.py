@@ -93,22 +93,38 @@ def build_record(
 
 
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=1)
-def event_catalog() -> pd.DataFrame:
-    path = DATA / "boulder_overview_history.parquet"
+def round_inventory() -> pd.DataFrame:
+    """Load source-reported round and boulder counts for the tag selector."""
+    path = DATA / "boulder_round_inventory.csv"
     if not path.exists():
-        return pd.DataFrame(columns=["event_name", "event_date"])
+        return pd.DataFrame()
     try:
-        frame = pd.read_parquet(path, columns=["event_name", "event_date"])
-    except (KeyError, ValueError):
-        frame = pd.read_parquet(path)
-        frame = frame[[column for column in ("event_name", "event_date") if column in frame]]
-    if "event_name" not in frame:
-        return pd.DataFrame(columns=["event_name", "event_date"])
+        frame = pd.read_csv(path, usecols=[
+            "event_name", "event_date", "round_group", "gender", "category",
+            "boulder_count", "boulder_count_status",
+        ])
+    except ValueError:
+        return pd.DataFrame()
+    if frame.empty:
+        return frame
     frame["event_name"] = frame["event_name"].fillna("").astype(str).str.strip()
-    frame["event_date"] = pd.to_datetime(frame.get("event_date"), errors="coerce")
+    frame["event_date"] = pd.to_datetime(frame["event_date"], errors="coerce")
+    frame["boulder_count"] = pd.to_numeric(frame["boulder_count"], errors="coerce")
     return frame.loc[frame["event_name"].ne("")].drop_duplicates().sort_values(
-        ["event_date", "event_name"], ascending=[False, True]
+        ["event_date", "event_name", "round_group", "gender"], ascending=[False, True, True, True]
     )
+
+
+def boulder_options(gender: str, count: object) -> list[str]:
+    """Return only source-supported M/W boulder labels when a count is known."""
+    try:
+        integer_count = int(float(count))
+    except (TypeError, ValueError):
+        return []
+    if integer_count < 1 or integer_count > 12 or gender not in {"Men", "Women"}:
+        return []
+    prefix = "M" if gender == "Men" else "W"
+    return [f"{prefix}{number}" for number in range(1, integer_count + 1)]
 
 
 def backend_url() -> str:
@@ -139,7 +155,8 @@ def main() -> None:
     st.title("Comp Climbing Boulder Tags")
     st.caption("Tag terrain demand, not athlete ability. Every saved proposal uses the shared v2 style-tag schema.")
     st.info("0 absent · 1 secondary · 2 important · 3 defining. Score Zone and Top separately.")
-    catalog = event_catalog()
+    inventory = round_inventory()
+    catalog = inventory[["event_name", "event_date"]].drop_duplicates() if not inventory.empty else pd.DataFrame()
     labels = ["Custom competition"] + [
         f"{row.event_date.date().isoformat() if pd.notna(row.event_date) else 'Date unknown'} — {row.event_name}"
         for row in catalog.itertuples(index=False)
@@ -147,11 +164,26 @@ def main() -> None:
     with st.form("style_tag_form", clear_on_submit=True):
         event_label = st.selectbox("Competition", labels)
         custom_event = st.text_input("Custom competition", disabled=event_label != "Custom competition")
-        context = st.columns(4)
-        round_name = context[0].selectbox("Round", ("Qualification", "Semi-final", "Final", "Other"))
-        category = context[1].selectbox("Terrain", ("Men", "Women", "Mixed / unknown"))
-        boulder = context[2].text_input("Boulder", placeholder="M1 or W3")
-        confidence = context[3].select_slider("Confidence", options=("Low", "Moderate", "High"), value="Moderate")
+        selected_inventory = pd.DataFrame()
+        if event_label != "Custom competition" and not inventory.empty:
+            selected_name = event_label.split(" — ", 1)[-1]
+            selected_inventory = inventory.loc[inventory["event_name"].eq(selected_name)]
+        available_rounds = sorted(selected_inventory["round_group"].dropna().astype(str).unique()) or ["Qualification", "Semi-final", "Final", "Other"]
+        round_name = st.selectbox("Round", available_rounds)
+        selected_round = selected_inventory.loc[selected_inventory["round_group"].eq(round_name)]
+        available_terrain = sorted(selected_round["gender"].dropna().astype(str).unique()) or ["Men", "Women", "Mixed / unknown"]
+        category = st.selectbox("Terrain", available_terrain)
+        selected_terrain = selected_round.loc[selected_round["gender"].eq(category)]
+        count = selected_terrain["boulder_count"].dropna().iloc[0] if selected_terrain["boulder_count"].notna().any() else None
+        supported_boulders = boulder_options(category, count)
+        route_context = st.columns(2)
+        if supported_boulders:
+            boulder = route_context[0].selectbox("Boulder", supported_boulders)
+            route_context[1].caption(f"Source reports {len(supported_boulders)} boulders for this terrain and round.")
+        else:
+            boulder = route_context[0].text_input("Boulder", placeholder="M1 or W3")
+            route_context[1].caption("No source count is available; enter a verified M/W route label.")
+        confidence = st.select_slider("Confidence", options=("Low", "Moderate", "High"), value="Moderate")
         directions = st.columns(2)
         zone_direction = directions[0].selectbox("Start to Zone direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))
         top_direction = directions[1].selectbox("Zone to Top direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))
