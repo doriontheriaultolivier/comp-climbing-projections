@@ -27,6 +27,10 @@ PROBLEM = {
 
 
 class StyleTaggingAppTest(unittest.TestCase):
+    def test_standalone_tagger_owns_its_data_path(self) -> None:
+        self.assertEqual(module.DATA, PATH.parents[0] / "data")
+        self.assertNotIn("from comp_climbing_app import", PATH.read_text(encoding="utf-8"))
+
     def test_canonical_broadcast_route_ids(self) -> None:
         self.assertEqual(module.canonical_boulder_label(" w-3 "), "W3")
         self.assertEqual(module.canonical_boulder_label("M 1"), "M1")

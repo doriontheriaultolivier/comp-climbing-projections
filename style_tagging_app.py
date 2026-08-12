@@ -5,6 +5,7 @@ import base64
 from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
 import re
 from urllib import error as urlerror
 from urllib import parse as urlparse
@@ -13,7 +14,10 @@ from urllib import request as urlrequest
 import pandas as pd
 import streamlit as st
 
-from comp_climbing_app import DATA
+
+# Keep the tagger independently deployable.  It only needs the governed
+# inventory file, not the projection application's import graph.
+DATA = Path(__file__).resolve().parent / "data"
 
 
 BOULDER_LABEL = re.compile(r"^([MW])\s*[-:]?\s*([1-9][0-9]*)$", re.IGNORECASE)
