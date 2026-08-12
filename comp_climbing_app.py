@@ -79,6 +79,9 @@ AGE_PROGRESSION_METHOD = (
 AGE_PROGRESSION_STATUS = "RESEARCH_AGGREGATE_MIN_20_NOT_CAUSAL"
 OBVIOUS_FIXTURE_EVENT_PATTERN = r"(?i)\b(?:test|mock|demo|dummy|sandbox|hidden)\b"
 JOINT_TEMPERATURE_SHADOW_PATH = DATA / "boulder_joint_temperature_shadow_v1.json"
+PROBABILITY_SPECTRUM_SHADOW_PATH = (
+    DATA / "boulder_probability_spectrum_shadow_v1.json"
+)
 TARGET_SCENARIO_DRAWS = 5000
 TARGET_SCENARIO_EVENT_SD = 155.0
 TARGET_SCENARIO_GUMBEL_SCALE = 400.0 / np.log(10.0)
@@ -173,6 +176,153 @@ def load_joint_temperature_shadow(
                 and max(row["placement_delta_ci95"]) < 0
             ):
                 return None
+        return value
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def load_probability_spectrum_shadow(
+    path: Path = PROBABILITY_SPECTRUM_SHADOW_PATH,
+) -> dict[str, object] | None:
+    """Load the aggregate locked spectrum audit used for coach-facing context."""
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if set(value) != {
+            "schema",
+            "status",
+            "evaluation",
+            "rating_diagnostics",
+            "age_diagnostics",
+            "cnr",
+            "prospective_temperature",
+            "source_bindings",
+            "use_limits",
+        }:
+            return None
+        if (
+            value["schema"] != "boulder-probability-spectrum-shadow-v1"
+            or value["status"] != "LOCKED_AGGREGATE_RESEARCH_DIAGNOSTIC"
+        ):
+            return None
+        evaluation = value["evaluation"]
+        if (
+            set(evaluation) != {
+                "competition_fields",
+                "canonical_pairs",
+                "years",
+                "bootstrap_draws",
+                "bootstrap_unit",
+            }
+            or evaluation["years"] != [2025, 2026]
+            or int(evaluation["competition_fields"]) != 3749
+            or int(evaluation["canonical_pairs"]) != 1164644
+            or int(evaluation["bootstrap_draws"]) < 300
+            or evaluation["bootstrap_unit"] != "competition_field"
+        ):
+            return None
+        ratings = value["rating_diagnostics"]
+        if not isinstance(ratings, list) or len(ratings) != 4:
+            return None
+        for row in ratings:
+            if set(row) != {
+                "comparison",
+                "events",
+                "forecast_mean",
+                "observed_rate",
+                "observed_minus_forecast",
+                "observed_minus_forecast_ci95",
+            }:
+                return None
+            numeric = [
+                row["events"],
+                row["forecast_mean"],
+                row["observed_rate"],
+                row["observed_minus_forecast"],
+                *row["observed_minus_forecast_ci95"],
+            ]
+            if any(isinstance(item, bool) or not np.isfinite(float(item)) for item in numeric):
+                return None
+            if not (
+                int(row["events"]) >= 20
+                and 0 <= float(row["forecast_mean"]) <= 1
+                and 0 <= float(row["observed_rate"]) <= 1
+                and np.isclose(
+                    float(row["observed_rate"]) - float(row["forecast_mean"]),
+                    float(row["observed_minus_forecast"]),
+                    atol=2e-6,
+                )
+            ):
+                return None
+        ages = value["age_diagnostics"]
+        if not isinstance(ages, list) or [row.get("age_band") for row in ages] != [
+            "18–21",
+            "22–26",
+            "32+",
+        ]:
+            return None
+        for row in ages:
+            if set(row) != {
+                "age_band",
+                "events",
+                "forecast_mean",
+                "observed_rate",
+                "observed_minus_forecast",
+            }:
+                return None
+            if any(
+                isinstance(row[key], bool) or not np.isfinite(float(row[key]))
+                for key in (
+                    "events",
+                    "forecast_mean",
+                    "observed_rate",
+                    "observed_minus_forecast",
+                )
+            ):
+                return None
+        cnr = value["cnr"]
+        if (
+            set(cnr) != {"available_for_event_date_calibration", "interpretation"}
+            or cnr["available_for_event_date_calibration"] is not False
+            or not isinstance(cnr["interpretation"], str)
+        ):
+            return None
+        temperatures = value["prospective_temperature"]
+        if not isinstance(temperatures, list) or [row.get("test_year") for row in temperatures] != [
+            2025,
+            2026,
+        ]:
+            return None
+        for row in temperatures:
+            if set(row) != {
+                "fit_years",
+                "test_year",
+                "temperature",
+                "log_loss_delta",
+                "log_loss_delta_ci95",
+            }:
+                return None
+            if not (
+                float(row["temperature"]) > 1
+                and float(row["log_loss_delta"]) < 0
+                and max(float(item) for item in row["log_loss_delta_ci95"]) < 0
+            ):
+                return None
+        bindings = value["source_bindings"]
+        if set(bindings) != {
+            "calibration_spectrum_sha256",
+            "named_pair_artifact_sha256",
+            "prospective_pair_output_sha256",
+        }:
+            return None
+        if any(
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            for digest in bindings.values()
+        ):
+            return None
         return value
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
@@ -1860,6 +2010,91 @@ def render_joint_temperature_shadow() -> None:
         )
 
 
+def render_probability_spectrum_shadow() -> None:
+    """Explain whether frozen pair probabilities reflected demonstrated level."""
+    spectrum = load_probability_spectrum_shadow()
+    if spectrum is None:
+        return
+    evaluation = spectrum["evaluation"]
+    st.subheader("Does the probability scale reflect demonstrated level?")
+    st.caption(
+        f"Locked 2025–26 diagnostic · {evaluation['competition_fields']:,} "
+        f"competition fields · {evaluation['canonical_pairs']:,} canonical pairs · "
+        "whole-field bootstrap. These are aggregate model checks, not athlete labels."
+    )
+    rating_rows = pd.DataFrame(spectrum["rating_diagnostics"]).rename(
+        columns={
+            "comparison": "Comparison",
+            "events": "Competition fields",
+            "forecast_mean": "Raw forecast",
+            "observed_rate": "Observed",
+            "observed_minus_forecast": "Observed − forecast",
+        }
+    )
+    rating_rows["Raw forecast"] = rating_rows["Raw forecast"].map(
+        lambda value: f"{value:.1%}"
+    )
+    rating_rows["Observed"] = rating_rows["Observed"].map(
+        lambda value: f"{value:.1%}"
+    )
+    rating_rows["Observed − forecast"] = rating_rows[
+        "Observed − forecast"
+    ].map(lambda value: f"{value:+.1%}")
+    st.dataframe(
+        rating_rows.drop(columns="observed_minus_forecast_ci95"),
+        hide_index=True,
+        width="stretch",
+    )
+    st.warning(
+        "The raw V4 probability link was too compressed toward 50%: athletes on "
+        "the stronger side of the rating spectrum won much more often than the raw "
+        "probabilities implied. The target-event scenario therefore uses the locked "
+        "T=3 shadow scale while remaining explicitly research-only.",
+        icon="⚠️",
+    )
+    with st.expander("Chronological repair, age diagnostics and CNR coverage"):
+        temperature_rows = pd.DataFrame(spectrum["prospective_temperature"])
+        temperature_rows["Fitted on"] = temperature_rows["fit_years"].map(
+            lambda years: "–".join(str(year) for year in years)
+        )
+        temperature_rows["Test year"] = temperature_rows["test_year"]
+        temperature_rows["Temperature"] = temperature_rows["temperature"].map(
+            lambda value: f"{value:.3f}"
+        )
+        temperature_rows["Pair log-loss change"] = temperature_rows[
+            "log_loss_delta"
+        ].map(lambda value: f"{value:+.5f}")
+        st.markdown("**Past-only temperature fitted, then evaluated on the next year**")
+        st.dataframe(
+            temperature_rows[
+                ["Fitted on", "Test year", "Temperature", "Pair log-loss change"]
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+        age_rows = pd.DataFrame(spectrum["age_diagnostics"]).rename(
+            columns={
+                "age_band": "Age band",
+                "events": "Competition fields",
+                "forecast_mean": "Forecast",
+                "observed_rate": "Observed",
+                "observed_minus_forecast": "Observed − forecast",
+            }
+        )
+        for column in ("Forecast", "Observed"):
+            age_rows[column] = age_rows[column].map(lambda value: f"{value:.1%}")
+        age_rows["Observed − forecast"] = age_rows["Observed − forecast"].map(
+            lambda value: f"{value:+.1%}"
+        )
+        st.markdown("**Age-band residual diagnostics**")
+        st.dataframe(age_rows, hide_index=True, width="stretch")
+        st.caption(
+            "Age residuals mix ability, source, pathway, survivor selection and "
+            "competition tier; they are not causal age effects and age is not added "
+            "as an ad-hoc probability correction. " + spectrum["cnr"]["interpretation"]
+        )
+
+
 def render_ifsc_pool(
     athletes: pd.DataFrame,
     history: pd.DataFrame,
@@ -2744,6 +2979,7 @@ def main() -> None:
         data.get("current_wc_projection_metadata"),
     )
     render_joint_temperature_shadow()
+    render_probability_spectrum_shadow()
 
     st.header("Overview")
     section = st.segmented_control(
