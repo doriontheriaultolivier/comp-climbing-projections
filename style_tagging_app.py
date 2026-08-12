@@ -5,6 +5,7 @@ import base64
 from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
 import re
 from urllib import error as urlerror
 from urllib import parse as urlparse
@@ -13,7 +14,10 @@ from urllib import request as urlrequest
 import pandas as pd
 import streamlit as st
 
-from comp_climbing_app import DATA
+
+# Keep the tagger independently deployable.  It only needs the governed
+# inventory file, not the projection application's import graph.
+DATA = Path(__file__).resolve().parent / "data"
 
 
 BOULDER_LABEL = re.compile(r"^([MW])\s*[-:]?\s*([1-9][0-9]*)$", re.IGNORECASE)
@@ -47,11 +51,45 @@ def route_fields() -> dict[str, str]:
     return dict(ROUTE_FIELD_LABELS)
 
 
+FRAME_PROVENANCE_FIELDS = (
+    "frame_candidate_id", "frame_sha256", "source_media_sha256",
+    "source_video_id", "source_frame_seconds",
+)
+
+
+def matching_frame_receipts(receipt: object, problem: dict[str, object]) -> list[dict[str, object]]:
+    """Return only review-only media candidates bound to this exact round/Boulder."""
+    if not isinstance(receipt, dict) or not isinstance(receipt.get("frames"), list):
+        return []
+    try:
+        round_ids = {int(value) for value in str(problem["source_round_ids"]).split(",") if value.strip()}
+        boulder_number = int(problem["boulder_number"])
+    except (KeyError, TypeError, ValueError):
+        return []
+    matched: list[dict[str, object]] = []
+    for frame in receipt["frames"]:
+        if not isinstance(frame, dict):
+            continue
+        slot = str(frame.get("boulder_slot", ""))
+        try:
+            slot_number = int(slot[1:]) if len(slot) > 1 and slot[0] in {"M", "W"} else -1
+            round_id = int(frame.get("category_round_id"))
+        except (TypeError, ValueError):
+            continue
+        if (
+            round_id in round_ids and slot_number == boulder_number
+            and frame.get("candidate_status") == "REQUIRES_VISUAL_EMPTY_WALL_REVIEW"
+            and frame.get("empty_wall_verified") is False
+        ):
+            matched.append(frame)
+    return sorted(matched, key=lambda frame: (str(frame.get("frame_seconds")), str(frame.get("candidate_id"))))
+
+
 def build_record(
     problem: dict[str, object], *, confidence: str, pre_zone_direction: str,
     post_zone_direction: str, core_values: dict[str, tuple[int, int]],
     detailed_values: dict[str, tuple[int, int]], optional_tags_completed: bool,
-    image_name: str = "", image_bytes: bytes = b"",
+    image_name: str = "", image_bytes: bytes = b"", frame: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Create a schema-v4 record bound to a governed boulder and its segments."""
     number = int(problem["boulder_number"])
@@ -75,6 +113,17 @@ def build_record(
         "image_sha256": hashlib.sha256(image_bytes).hexdigest() if image_bytes else "",
         "image_in_bundle": "" if not image_bytes else "uploaded_to_shared_backend",
     }
+    if frame is not None:
+        provenance = {
+            "frame_candidate_id": str(frame.get("candidate_id", "")),
+            "frame_sha256": str(frame.get("frame_sha256", "")),
+            "source_media_sha256": str(frame.get("source_media_sha256", "")),
+            "source_video_id": str(frame.get("video_id", "")),
+            "source_frame_seconds": float(frame.get("frame_seconds")),
+        }
+        if not all(provenance[key] for key in FRAME_PROVENANCE_FIELDS):
+            raise ValueError("frame provenance is incomplete")
+        record.update(provenance)
     for field, (pre_zone, post_zone) in core_values.items():
         record[f"pre_zone_{field}"] = pre_zone
         record[f"post_zone_{field}"] = post_zone
@@ -188,10 +237,26 @@ def main() -> None:
                     post = st.slider("Zone to Top", 0, 3, 0, key=f"post_detail_{field}")
                     detailed_values[field] = (pre, post)
         image = st.file_uploader("Boulder image (optional)", type=("jpg", "jpeg", "png"))
+        receipt_file = st.file_uploader("Frame extraction receipt (optional)", type=("json",))
+        matched_frames: list[dict[str, object]] = []
+        if receipt_file is not None:
+            try:
+                matched_frames = matching_frame_receipts(json.loads(receipt_file.getvalue()), selected_problem)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                st.warning("The frame receipt is not valid JSON.")
+            if matched_frames:
+                st.caption(f"{len(matched_frames)} review-only frame candidate(s) match this Boulder. Select the image file separately; the receipt does not assert an empty wall.")
+            else:
+                st.caption("No review-only frame candidate in this receipt matches the selected governed Boulder.")
+        selected_frame = st.selectbox(
+            "Frame provenance (optional)",
+            [None, *matched_frames],
+            format_func=lambda frame: "No receipt provenance" if frame is None else f"{frame['candidate_id']} · {frame['frame_seconds']}s",
+        )
         submitted = st.form_submit_button("Save style-tag proposal", type="primary")
     if submitted:
         image_bytes = image.getvalue() if image else b""
-        record = build_record(selected_problem, confidence=confidence, pre_zone_direction=pre_direction, post_zone_direction=post_direction, core_values=core_values, detailed_values=detailed_values, optional_tags_completed=optional_tags_completed, image_name=image.name if image else "", image_bytes=image_bytes)
+        record = build_record(selected_problem, confidence=confidence, pre_zone_direction=pre_direction, post_zone_direction=post_direction, core_values=core_values, detailed_values=detailed_values, optional_tags_completed=optional_tags_completed, image_name=image.name if image else "", image_bytes=image_bytes, frame=selected_frame)
         st.session_state.setdefault("style_tag_records", []).append(record)
         url = backend_url()
         if url:

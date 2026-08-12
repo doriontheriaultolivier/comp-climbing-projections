@@ -1,0 +1,57 @@
+{
+  "fit_year": 2024,
+  "joint_distribution_contract": "one_complete_normal_plus_gumbel_ranking_law",
+  "limits": [
+    "applies_to_frozen_v4_global_family_only",
+    "not_applied_to_current_athlete_cards",
+    "cnr_unavailable_not_imputed",
+    "era_format_and_supported_subgroup_diagnostics_remain"
+  ],
+  "locked_test_years": [
+    2025,
+    2026
+  ],
+  "model_family": "v4_global",
+  "results": [
+    {
+      "competitions": 604,
+      "pair_delta_ci95": [
+        -0.012562,
+        -0.009003
+      ],
+      "placement_delta_ci95": [
+        -0.003582,
+        -0.002661
+      ],
+      "raw_pair_log_loss": 0.681755,
+      "raw_placement_rps": 0.174391,
+      "shadow_pair_log_loss": 0.671204,
+      "shadow_placement_rps": 0.171311,
+      "year": 2025
+    },
+    {
+      "competitions": 401,
+      "pair_delta_ci95": [
+        -0.014814,
+        -0.009522
+      ],
+      "placement_delta_ci95": [
+        -0.004637,
+        -0.00345
+      ],
+      "raw_pair_log_loss": 0.676988,
+      "raw_placement_rps": 0.172309,
+      "shadow_pair_log_loss": 0.663732,
+      "shadow_placement_rps": 0.167947,
+      "year": 2026
+    }
+  ],
+  "schema": "boulder-joint-temperature-shadow-v1",
+  "selected_temperature": 3.0,
+  "source_bindings": {
+    "locked_audit": "BOULDER_JOINT_TEMPERATURE_LOCKED_AUDIT_2026-08-12.md",
+    "stage_a_manifest_sha256": "a0e49e717994281f3a8fa1c970c27ac0adf90a4ab1a478a42564701244a23ac8",
+    "stage_a_predictions_sha256": "0723a2bf1dad94f39cf39ad036534309b9610db774a10598fee0a3a0aed496a1"
+  },
+  "status": "LOCKED_RESEARCH_SHADOW_NOT_CURRENT_PRODUCTION"
+}

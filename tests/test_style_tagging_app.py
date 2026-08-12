@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import unittest
 
+from streamlit.testing.v1 import AppTest
 
 PATH = Path(__file__).parents[1] / "style_tagging_app.py"
 SPEC = importlib.util.spec_from_file_location("style_tagging_app", PATH)
@@ -27,6 +28,21 @@ PROBLEM = {
 
 
 class StyleTaggingAppTest(unittest.TestCase):
+    def test_standalone_entrypoint_renders_with_governed_inventory(self) -> None:
+        app = AppTest.from_file(str(PATH)).run(timeout=120)
+        self.assertFalse(app.exception)
+        self.assertFalse(app.error)
+        self.assertEqual(app.title[0].value, "Comp Climbing Boulder Tags")
+        self.assertEqual(
+            [control.label for control in app.selectbox[:4]],
+            ["Competition", "Round", "Terrain", "Boulder"],
+        )
+        self.assertIn("Save style-tag proposal", [button.label for button in app.button])
+
+    def test_standalone_tagger_owns_its_data_path(self) -> None:
+        self.assertEqual(module.DATA, PATH.parents[0] / "data")
+        self.assertNotIn("from comp_climbing_app import", PATH.read_text(encoding="utf-8"))
+
     def test_canonical_broadcast_route_ids(self) -> None:
         self.assertEqual(module.canonical_boulder_label(" w-3 "), "W3")
         self.assertEqual(module.canonical_boulder_label("M 1"), "M1")
@@ -43,6 +59,13 @@ class StyleTaggingAppTest(unittest.TestCase):
         self.assertEqual(record["boulder"], "B2")
         self.assertEqual(record["pre_zone_crimp_edge_0_3"], 3)
         self.assertEqual(record["post_zone_crimp_edge_0_3"], 2)
+
+    def test_frame_receipt_matches_exact_round_and_boulder_only(self) -> None:
+        receipt = {"frames": [
+            {"candidate_id": "BWF-0123456789abcdef", "category_round_id": 456, "boulder_slot": "M2", "candidate_status": "REQUIRES_VISUAL_EMPTY_WALL_REVIEW", "empty_wall_verified": False, "frame_seconds": 12.5},
+            {"candidate_id": "BWF-fedcba9876543210", "category_round_id": 999, "boulder_slot": "M2", "candidate_status": "REQUIRES_VISUAL_EMPTY_WALL_REVIEW", "empty_wall_verified": False, "frame_seconds": 13.5},
+        ]}
+        self.assertEqual([row["candidate_id"] for row in module.matching_frame_receipts(receipt, PROBLEM)], ["BWF-0123456789abcdef"])
 
     def test_shared_record_endpoint_preserves_existing_query_parameters(self) -> None:
         self.assertEqual(module.shared_records_url("https://example.test/exec", 25), "https://example.test/exec?action=list&limit=25")
