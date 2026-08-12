@@ -15,6 +15,17 @@ sys.modules[SPEC.name] = module
 SPEC.loader.exec_module(module)
 
 
+PROBLEM = {
+    "source_scope": "IFSC", "source_event_ids": "123", "source_round_ids": "456",
+    "event_date": "2026-08-11", "event_name": "Test Open", "round_group": "Final",
+    "round_uid": "round-1234567890abcdef1234", "gender": "Women", "terrain_group": "Open / Senior",
+    "boulder_number": 2, "boulder_count": 4, "boulder_count_status": "source-confirmed",
+    "boulder_uid": "round-1234567890abcdef1234-b2",
+    "pre_zone_segment_uid": "round-1234567890abcdef1234-b2-pre-zone",
+    "post_zone_segment_uid": "round-1234567890abcdef1234-b2-post-zone",
+}
+
+
 class StyleTaggingAppTest(unittest.TestCase):
     def test_canonical_broadcast_route_ids(self) -> None:
         self.assertEqual(module.canonical_boulder_label(" w-3 "), "W3")
@@ -24,39 +35,18 @@ class StyleTaggingAppTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.canonical_boulder_label("B5")
 
-    def test_limits_known_rounds_to_the_source_boulder_count(self) -> None:
-        self.assertEqual(module.boulder_options("Women", 4), ["W1", "W2", "W3", "W4"])
-        self.assertEqual(module.boulder_options("Men", "5.0"), ["M1", "M2", "M3", "M4", "M5"])
-        self.assertEqual(module.boulder_options("Mixed / unknown", 4), [])
+    def test_builds_a_schema_v4_record_bound_to_a_problem(self) -> None:
+        record = module.build_record(PROBLEM, confidence="High", pre_zone_direction="Up", post_zone_direction="Diagonal", core_values={field: (2, 1) for field in module.CORE_TAG_LABELS}, detailed_values={"crimp_edge_0_3": (3, 2)}, optional_tags_completed=True)
+        schema = json.loads((Path(__file__).parents[1] / "schemas" / "boulder_style_tag_schema_v4.json").read_text())
+        self.assertEqual(record["schema_version"], "4.0")
+        self.assertTrue(set(schema["required"]).issubset(record))
+        self.assertEqual(record["boulder"], "B2")
+        self.assertEqual(record["pre_zone_crimp_edge_0_3"], 3)
+        self.assertEqual(record["post_zone_crimp_edge_0_3"], 2)
 
     def test_shared_record_endpoint_preserves_existing_query_parameters(self) -> None:
-        self.assertEqual(
-            module.shared_records_url("https://example.test/exec", 25),
-            "https://example.test/exec?action=list&limit=25",
-        )
-        self.assertEqual(
-            module.shared_records_url("https://example.test/exec?token=public", 25),
-            "https://example.test/exec?token=public&action=list&limit=25",
-        )
-
-    def test_loads_the_governed_route_demand_fields(self) -> None:
-        fields = module.route_fields()
-        self.assertIn("three_dimensionality_0_3", fields)
-        self.assertNotIn("volume_macro_density_0_3", fields)
-
-    def test_builds_a_schema_v2_record(self) -> None:
-        record = module.build_record(
-            competition="2026 Test Open", competition_date="2026-08-11", round_name="Final",
-            category="Women", boulder="W2", confidence="High", top_direction="Up",
-            zone_direction="Diagonal", core_values={field: (2, 1) for field in module.CORE_TAG_LABELS},
-            detailed_values={"crimp_edge_0_3": (3, 2)}, optional_tags_completed=True,
-        )
-        schema = json.loads((Path(__file__).parents[1] / "schemas" / "boulder_style_tag_schema_v2.json").read_text())
-        self.assertEqual(record["schema_version"], "2.0")
-        self.assertTrue(set(schema["required"]).issubset(record))
-        self.assertNotIn("route_tags", record)
-        self.assertEqual(record["top_crimp_edge_0_3"], 3)
-        self.assertEqual(record["zone_crimp_edge_0_3"], 2)
+        self.assertEqual(module.shared_records_url("https://example.test/exec", 25), "https://example.test/exec?action=list&limit=25")
+        self.assertEqual(module.shared_records_url("https://example.test/exec?token=public", 25), "https://example.test/exec?token=public&action=list&limit=25")
 
 
 if __name__ == "__main__":

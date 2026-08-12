@@ -1,4 +1,4 @@
-"""Standalone schema-v2 public tagger for Comp Climbing Boulder Tags."""
+"""Standalone public tagger for governed Boulder route and segment observations."""
 from __future__ import annotations
 
 import base64
@@ -16,116 +16,92 @@ import streamlit as st
 from comp_climbing_app import DATA
 
 
-BOULDER_LABEL = re.compile(r"^([MW])\s*[-:]?\s*([1-4])$", re.IGNORECASE)
+BOULDER_LABEL = re.compile(r"^([MW])\s*[-:]?\s*([1-9][0-9]*)$", re.IGNORECASE)
 CORE_TAG_LABELS = {
     "physical_0_3": "Physical demand",
     "technical_0_3": "Technical demand",
     "coordination_0_3": "Coordination demand",
-    "verticality_0_3": "Verticality demand",
 }
 ROUTE_FIELD_LABELS = {
-    "wall_overhang_0_3": "Wall angle demand",
-    "three_dimensionality_0_3": "Three-dimensional movement",
-    "dual_texture_friction_0_3": "Dual-texture / friction demand",
-    "hold_positivity_0_3": "Handhold positivity",
-    "crimp_edge_0_3": "Crimp / edge use",
-    "open_hand_sloper_0_3": "Open-hand / sloper use",
-    "pinch_0_3": "Pinch use",
-    "compression_opposition_0_3": "Compression / opposition",
-    "slow_technical_0_3": "Slow technical movement",
-    "upper_pull_0_3": "Upper-body pulling",
-    "upper_push_0_3": "Upper-body pushing",
-    "fast_upper_accuracy_0_3": "Fast hand accuracy",
-    "fast_lower_accuracy_0_3": "Fast foot accuracy",
-    "lower_explosivity_0_3": "Lower-body explosivity",
-    "body_tension_core_0_3": "Body tension / core",
-    "mobility_flexibility_0_3": "Mobility / flexibility",
-    "reach_span_0_3": "Reach / span",
-    "read_complexity_0_3": "Reading complexity",
-    "precision_risk_0_3": "Precision risk",
-    "attempt_cost_0_3": "Attempt cost",
+    "wall_overhang_0_3": "Wall angle demand", "three_dimensionality_0_3": "Three-dimensional movement",
+    "dual_texture_friction_0_3": "Dual-texture / friction demand", "hold_positivity_0_3": "Handhold positivity",
+    "crimp_edge_0_3": "Crimp / edge use", "open_hand_sloper_0_3": "Open-hand / sloper use",
+    "pinch_0_3": "Pinch use", "compression_opposition_0_3": "Compression / opposition",
+    "slow_technical_0_3": "Slow technical movement", "upper_pull_0_3": "Upper-body pulling",
+    "upper_push_0_3": "Upper-body pushing", "fast_upper_accuracy_0_3": "Fast hand accuracy",
+    "fast_lower_accuracy_0_3": "Fast foot accuracy", "lower_explosivity_0_3": "Lower-body explosivity",
+    "body_tension_core_0_3": "Body tension / core", "mobility_flexibility_0_3": "Mobility / flexibility",
+    "reach_span_0_3": "Reach / span", "read_complexity_0_3": "Reading complexity",
+    "precision_risk_0_3": "Precision risk", "attempt_cost_0_3": "Attempt cost",
 }
 
 
 def canonical_boulder_label(value: str) -> str:
-    """Canonicalise the public route IDs used by IFSC Boulder broadcasts."""
     match = BOULDER_LABEL.fullmatch(value.strip())
     if match is None:
-        raise ValueError("Use M1-M4 or W1-W4")
-    return f"{match.group(1).upper()}{match.group(2)}"
+        raise ValueError("Use a label such as M1 or W3")
+    return f"{match.group(1).upper()}{int(match.group(2))}"
 
 
 def route_fields() -> dict[str, str]:
-    """Return optional detailed route-demand fields for the v2 tag record."""
     return dict(ROUTE_FIELD_LABELS)
 
 
 def build_record(
-    *, competition: str, competition_date: str, round_name: str, category: str,
-    boulder: str, confidence: str, top_direction: str, zone_direction: str,
-    core_values: dict[str, tuple[int, int]], detailed_values: dict[str, tuple[int, int]],
-    optional_tags_completed: bool, image_name: str = "", image_bytes: bytes = b"",
+    problem: dict[str, object], *, confidence: str, pre_zone_direction: str,
+    post_zone_direction: str, core_values: dict[str, tuple[int, int]],
+    detailed_values: dict[str, tuple[int, int]], optional_tags_completed: bool,
+    image_name: str = "", image_bytes: bytes = b"",
 ) -> dict[str, object]:
-    """Build a schema-v2 record accepted by the shared style-tag backend."""
+    """Create a schema-v4 record bound to a governed boulder and its segments."""
+    number = int(problem["boulder_number"])
     record: dict[str, object] = {
-        "schema_version": "2.0",
+        "schema_version": "4.0", "tag_taxonomy_version": "2026-08-03.1", "record_type": "style",
         "submitted_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "competition": competition,
-        "competition_date": competition_date,
-        "round": round_name,
-        "gender_terrain": category,
-        "boulder": boulder,
-        "top_direction": top_direction,
-        "zone_direction": zone_direction,
-        "optional_tags_completed": optional_tags_completed,
-        "confidence": confidence,
+        "competition": str(problem["event_name"]), "competition_date": str(problem["event_date"]),
+        "source_scope": str(problem["source_scope"]), "source_event_ids": str(problem["source_event_ids"]),
+        "source_round_ids": str(problem["source_round_ids"]), "round": str(problem["round_group"]),
+        "round_uid": str(problem["round_uid"]), "gender_terrain": str(problem["gender"]),
+        "terrain_group": str(problem["terrain_group"]), "boulder": f"B{number}",
+        "boulder_uid": str(problem["boulder_uid"]),
+        "pre_zone_segment_uid": str(problem["pre_zone_segment_uid"]),
+        "post_zone_segment_uid": str(problem["post_zone_segment_uid"]),
+        "expected_boulders": int(problem["boulder_count"]),
+        "boulder_count_status": str(problem["boulder_count_status"]),
+        "boulder_count_source": "data/boulder_problem_inventory.csv.gz",
+        "pre_zone_direction": pre_zone_direction, "post_zone_direction": post_zone_direction,
+        "optional_tags_completed": optional_tags_completed, "confidence": confidence,
         "image_name": image_name,
         "image_sha256": hashlib.sha256(image_bytes).hexdigest() if image_bytes else "",
         "image_in_bundle": "" if not image_bytes else "uploaded_to_shared_backend",
     }
-    for field, (top_value, zone_value) in core_values.items():
-        record[f"top_{field}"] = top_value
-        record[f"zone_{field}"] = zone_value
+    for field, (pre_zone, post_zone) in core_values.items():
+        record[f"pre_zone_{field}"] = pre_zone
+        record[f"post_zone_{field}"] = post_zone
     if optional_tags_completed:
-        for field, (top_value, zone_value) in detailed_values.items():
-            record[f"top_{field}"] = top_value
-            record[f"zone_{field}"] = zone_value
+        for field, (pre_zone, post_zone) in detailed_values.items():
+            record[f"pre_zone_{field}"] = pre_zone
+            record[f"post_zone_{field}"] = post_zone
     return record
 
 
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=1)
-def round_inventory() -> pd.DataFrame:
-    """Load source-reported round and boulder counts for the tag selector."""
-    path = DATA / "boulder_round_inventory.csv"
+def problem_inventory() -> pd.DataFrame:
+    path = DATA / "boulder_problem_inventory.csv.gz"
     if not path.exists():
         return pd.DataFrame()
-    try:
-        frame = pd.read_csv(path, usecols=[
-            "event_name", "event_date", "round_group", "gender", "category",
-            "boulder_count", "boulder_count_status",
-        ])
-    except ValueError:
-        return pd.DataFrame()
-    if frame.empty:
-        return frame
+    frame = pd.read_csv(path, low_memory=False)
     frame["event_name"] = frame["event_name"].fillna("").astype(str).str.strip()
     frame["event_date"] = pd.to_datetime(frame["event_date"], errors="coerce")
-    frame["boulder_count"] = pd.to_numeric(frame["boulder_count"], errors="coerce")
-    return frame.loc[frame["event_name"].ne("")].drop_duplicates().sort_values(
-        ["event_date", "event_name", "round_group", "gender"], ascending=[False, True, True, True]
+    return frame.loc[frame["event_name"].ne("")].sort_values(
+        ["event_date", "event_name", "round_group", "gender", "boulder_number"],
+        ascending=[False, True, True, True, True], kind="stable",
     )
 
 
-def boulder_options(gender: str, count: object) -> list[str]:
-    """Return only source-supported M/W boulder labels when a count is known."""
-    try:
-        integer_count = int(float(count))
-    except (TypeError, ValueError):
-        return []
-    if integer_count < 1 or integer_count > 12 or gender not in {"Men", "Women"}:
-        return []
-    prefix = "M" if gender == "Men" else "W"
-    return [f"{prefix}{number}" for number in range(1, integer_count + 1)]
+def problem_display(row: pd.Series) -> str:
+    prefix = {"Men": "M", "Women": "W"}.get(str(row.gender), "B")
+    return f"{prefix}{int(row.boulder_number)} · governed {row.boulder_uid}"
 
 
 def backend_url() -> str:
@@ -139,10 +115,7 @@ def save_remotely(url: str, record: dict[str, object], image_bytes: bytes = b"")
     payload: dict[str, object] = {"record": record}
     if image_bytes:
         payload["image_base64"] = base64.b64encode(image_bytes).decode("ascii")
-    request = urlrequest.Request(
-        url, data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        headers={"Content-Type": "application/json"}, method="POST",
-    )
+    request = urlrequest.Request(url, data=json.dumps(payload, separators=(",", ":")).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urlrequest.urlopen(request, timeout=20) as response:
             answer = json.loads(response.read().decode("utf-8"))
@@ -152,22 +125,18 @@ def save_remotely(url: str, record: dict[str, object], image_bytes: bytes = b"")
 
 
 def shared_records_url(url: str, limit: int = 100) -> str:
-    """Add the backend's read-only list action without assuming URL shape."""
-    separator = "&" if "?" in url else "?"
-    return f"{url}{separator}{urlparse.urlencode({'action': 'list', 'limit': limit})}"
+    return f"{url}{'&' if '?' in url else '?'}{urlparse.urlencode({'action': 'list', 'limit': limit})}"
 
 
 @st.cache_data(show_spinner=False, ttl=120, max_entries=1)
 def load_shared_records(url: str) -> tuple[list[dict[str, object]], str]:
-    """Read a bounded recent-tag list; an unavailable backend never blocks tagging."""
     try:
         with urlrequest.urlopen(shared_records_url(url), timeout=15) as response:
             answer = json.loads(response.read().decode("utf-8"))
         records = answer.get("records", [])
         if not answer.get("ok") or not isinstance(records, list):
             return [], str(answer.get("message", "Shared tag list is unavailable"))
-        clean_records = [item for item in records if isinstance(item, dict)]
-        return clean_records, ""
+        return [item for item in records if isinstance(item, dict)], ""
     except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
         return [], f"Shared tag list is unavailable: {exc}"
 
@@ -175,48 +144,38 @@ def load_shared_records(url: str) -> tuple[list[dict[str, object]], str]:
 def main() -> None:
     st.set_page_config(page_title="Comp Climbing Boulder Tags", page_icon="B", layout="wide")
     st.title("Comp Climbing Boulder Tags")
-    st.caption("Tag terrain demand, not athlete ability. Every saved proposal uses the shared v2 style-tag schema.")
-    st.info("0 absent · 1 secondary · 2 important · 3 defining. Score Zone and Top separately.")
-    inventory = round_inventory()
-    catalog = inventory[["event_name", "event_date"]].drop_duplicates() if not inventory.empty else pd.DataFrame()
-    labels = ["Custom competition"] + [
-        f"{row.event_date.date().isoformat() if pd.notna(row.event_date) else 'Date unknown'} — {row.event_name}"
-        for row in catalog.itertuples(index=False)
-    ]
+    st.caption("Tag terrain demand, not athlete ability. Records bind to the governed boulder and its two segments.")
+    st.info("0 absent · 1 secondary · 2 important · 3 defining. Score start-to-Zone and Zone-to-Top separately.")
+    inventory = problem_inventory()
+    if inventory.empty:
+        st.error("The governed boulder inventory is unavailable; tagging is disabled until it is restored.")
+        return
+    events = inventory[["event_name", "event_date"]].drop_duplicates()
+    event_labels = [f"{row.event_date.date().isoformat() if pd.notna(row.event_date) else 'Date unknown'} — {row.event_name}" for row in events.itertuples(index=False)]
     with st.form("style_tag_form", clear_on_submit=True):
-        event_label = st.selectbox("Competition", labels)
-        custom_event = st.text_input("Custom competition", disabled=event_label != "Custom competition")
-        selected_inventory = pd.DataFrame()
-        if event_label != "Custom competition" and not inventory.empty:
-            selected_name = event_label.split(" — ", 1)[-1]
-            selected_inventory = inventory.loc[inventory["event_name"].eq(selected_name)]
-        available_rounds = sorted(selected_inventory["round_group"].dropna().astype(str).unique()) or ["Qualification", "Semi-final", "Final", "Other"]
-        round_name = st.selectbox("Round", available_rounds)
-        selected_round = selected_inventory.loc[selected_inventory["round_group"].eq(round_name)]
-        available_terrain = sorted(selected_round["gender"].dropna().astype(str).unique()) or ["Men", "Women", "Mixed / unknown"]
-        category = st.selectbox("Terrain", available_terrain)
-        selected_terrain = selected_round.loc[selected_round["gender"].eq(category)]
-        count = selected_terrain["boulder_count"].dropna().iloc[0] if selected_terrain["boulder_count"].notna().any() else None
-        supported_boulders = boulder_options(category, count)
-        route_context = st.columns(2)
-        if supported_boulders:
-            boulder = route_context[0].selectbox("Boulder", supported_boulders)
-            route_context[1].caption(f"Source reports {len(supported_boulders)} boulders for this terrain and round.")
-        else:
-            boulder = route_context[0].text_input("Boulder", placeholder="M1 or W3")
-            route_context[1].caption("No source count is available; enter a verified M/W route label.")
+        event_label = st.selectbox("Competition", event_labels)
+        event_name = event_label.split(" — ", 1)[-1]
+        event_rows = inventory.loc[inventory.event_name.eq(event_name)]
+        round_name = st.selectbox("Round", sorted(event_rows.round_group.dropna().astype(str).unique()))
+        round_rows = event_rows.loc[event_rows.round_group.eq(round_name)]
+        terrain = st.selectbox("Terrain", sorted(round_rows.gender.dropna().astype(str).unique()))
+        terrain_rows = round_rows.loc[round_rows.gender.eq(terrain)]
+        choices = terrain_rows.apply(problem_display, axis=1).tolist()
+        chosen_display = st.selectbox("Boulder", choices)
+        selected_problem = terrain_rows.loc[terrain_rows.apply(problem_display, axis=1).eq(chosen_display)].iloc[0].to_dict()
+        st.caption(f"{selected_problem['boulder_count_status']} count: {int(selected_problem['boulder_count'])}; terrain: {selected_problem['terrain_group']}")
         confidence = st.select_slider("Confidence", options=("Low", "Moderate", "High"), value="Moderate")
         directions = st.columns(2)
-        zone_direction = directions[0].selectbox("Start to Zone direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))
-        top_direction = directions[1].selectbox("Zone to Top direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))
+        pre_direction = directions[0].selectbox("Start to Zone direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))
+        post_direction = directions[1].selectbox("Zone to Top direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))
         st.subheader("Core demand")
         core_values: dict[str, tuple[int, int]] = {}
-        for column, (field, label) in zip(st.columns(4), CORE_TAG_LABELS.items()):
+        for column, (field, label) in zip(st.columns(3), CORE_TAG_LABELS.items()):
             with column:
                 st.markdown(f"**{label}**")
-                zone = st.slider("Zone", 0, 3, 0, key=f"zone_core_{field}")
-                top = st.slider("Top", 0, 3, 0, key=f"top_core_{field}")
-                core_values[field] = (top, zone)
+                pre = st.slider("Start to Zone", 0, 3, 0, key=f"pre_core_{field}")
+                post = st.slider("Zone to Top", 0, 3, 0, key=f"post_core_{field}")
+                core_values[field] = (pre, post)
         optional_tags_completed = st.checkbox("Add detailed route-demand tags", value=False)
         detailed_values: dict[str, tuple[int, int]] = {}
         if optional_tags_completed:
@@ -225,34 +184,14 @@ def main() -> None:
             for index, (field, label) in enumerate(route_fields().items()):
                 with columns[index % 4]:
                     st.markdown(f"**{label}**")
-                    zone = st.slider("Zone", 0, 3, 0, key=f"zone_detail_{field}")
-                    top = st.slider("Top", 0, 3, 0, key=f"top_detail_{field}")
-                    detailed_values[field] = (top, zone)
+                    pre = st.slider("Start to Zone", 0, 3, 0, key=f"pre_detail_{field}")
+                    post = st.slider("Zone to Top", 0, 3, 0, key=f"post_detail_{field}")
+                    detailed_values[field] = (pre, post)
         image = st.file_uploader("Boulder image (optional)", type=("jpg", "jpeg", "png"))
         submitted = st.form_submit_button("Save style-tag proposal", type="primary")
     if submitted:
-        try:
-            route_id = canonical_boulder_label(boulder)
-        except ValueError as exc:
-            st.error(str(exc))
-            return
-        competition = custom_event.strip() if event_label == "Custom competition" else event_label.split(" — ", 1)[-1]
-        if not competition:
-            st.error("Choose or enter a competition.")
-            return
-        competition_date = ""
-        if event_label != "Custom competition":
-            selected = catalog.iloc[labels.index(event_label) - 1]
-            if pd.notna(selected.event_date):
-                competition_date = selected.event_date.date().isoformat()
         image_bytes = image.getvalue() if image else b""
-        record = build_record(
-            competition=competition, competition_date=competition_date, round_name=round_name,
-            category=category, boulder=route_id, confidence=confidence, top_direction=top_direction,
-            zone_direction=zone_direction, core_values=core_values, detailed_values=detailed_values,
-            optional_tags_completed=optional_tags_completed, image_name=image.name if image else "",
-            image_bytes=image_bytes,
-        )
+        record = build_record(selected_problem, confidence=confidence, pre_zone_direction=pre_direction, post_zone_direction=post_direction, core_values=core_values, detailed_values=detailed_values, optional_tags_completed=optional_tags_completed, image_name=image.name if image else "", image_bytes=image_bytes)
         st.session_state.setdefault("style_tag_records", []).append(record)
         url = backend_url()
         if url:
@@ -267,8 +206,7 @@ def main() -> None:
         st.download_button("Download style-tag review JSON", json.dumps(records, indent=2), "comp_climbing_style_tags.json", "application/json")
     url = backend_url()
     if url:
-        st.divider()
-        st.subheader("Recent shared tags")
+        st.divider(); st.subheader("Recent shared tags")
         if st.button("Refresh shared tags"):
             load_shared_records.clear()
         shared, shared_error = load_shared_records(url)
@@ -276,11 +214,8 @@ def main() -> None:
             st.caption(shared_error)
         elif shared:
             visible = pd.DataFrame(shared)
-            preferred = [
-                "submitted_at_utc", "competition_date", "competition", "round",
-                "gender_terrain", "boulder", "confidence", "image_public_url",
-            ]
-            st.dataframe(visible[[column for column in preferred if column in visible]], hide_index=True, width="stretch")
+            columns = [key for key in ("submitted_at_utc", "competition_date", "competition", "round", "gender_terrain", "boulder", "confidence", "image_public_url") if key in visible]
+            st.dataframe(visible[columns], hide_index=True, width="stretch")
         else:
             st.caption("No shared tags yet.")
 
