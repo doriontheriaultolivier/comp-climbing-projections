@@ -1,0 +1,180 @@
+name: 2026 Boulder anchor verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: Call Gemini Flash-Lite after the mandatory dry run
+        required: true
+        default: false
+        type: boolean
+      max_pending_windows_per_event:
+        description: Fresh or retryable 60-second windows processed per event (1-12)
+        required: true
+        default: "12"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: boulder-anchor-verification-v4-frozen77-anchors1fps-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify-event:
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - event_id: 1479
+            event_slug: madrid
+          - event_id: 1480
+            event_slug: prague
+          - event_id: 1482
+            event_slug: innsbruck
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Check bounded verification scope
+        env:
+          MAX_WINDOWS: ${{ inputs.max_pending_windows_per_event }}
+        run: |
+          if ! [[ "$MAX_WINDOWS" =~ ^[0-9]+$ ]] || [ "$MAX_WINDOWS" -lt 1 ] || [ "$MAX_WINDOWS" -gt 12 ]; then
+            echo "max_pending_windows_per_event must be between 1 and 12" >&2
+            exit 1
+          fi
+      - name: Install direct-review runtime
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install "google-genai==1.75.0"
+      - name: Validate frozen discovery packet and verification contracts
+        run: |
+          python scripts/validate_boulder_anchor_discovery_packet.py
+          python -m unittest \
+            tests.test_video_boulder_anchor_discovery \
+            tests.test_boulder_anchor_verification_workflow \
+            -v
+          python -m py_compile \
+            scripts/run_boulder_anchor_discovery.py \
+            scripts/validate_boulder_anchor_discovery.py \
+            scripts/merge_boulder_anchor_verification_checkpoints.py \
+            video_boulder_anchor_verification_merge.py
+      - name: Restore isolated event verification checkpoint
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-${{ matrix.event_id }}
+          key: boulder-anchor-verification-v4-frozen77-anchors1fps-${{ github.ref_name }}-event${{ matrix.event_id }}-flash-lite-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            boulder-anchor-verification-v4-frozen77-anchors1fps-${{ github.ref_name }}-event${{ matrix.event_id }}-flash-lite-
+      - name: Mandatory event-scoped dry run
+        env:
+          MAX_WINDOWS: ${{ inputs.max_pending_windows_per_event }}
+        run: |
+          python scripts/run_boulder_anchor_discovery.py \
+            --pass verification \
+            --event-id ${{ matrix.event_id }} \
+            --required-source-manifest-sha256 8f6ce23cfd3da6d01ef75dbf795e24cba3040aee8aa143add8b7e69feadc8772 \
+            --discovery-checkpoint data/video_boulder_anchor_discovery_2026_v1/merged_review_windows.jsonl \
+            --required-discovery-checkpoint-sha256 49fdce904c9b5a720c14f38033253378def7b22d95b291ac0cb30b72daa0e3ab \
+            --verification-candidate-source anchors-only \
+            --contract-namespace boulder-anchor-verification-v4-frozen77-anchors1fps \
+            --model gemini-3.1-flash-lite \
+            --verification-seconds 60 \
+            --fps 1.0 \
+            --max-windows "$MAX_WINDOWS" \
+            --max-validation-retries 1 \
+            --max-transient-retries 2 \
+            --request-timeout-ms 900000 \
+            --output-dir artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-${{ matrix.event_id }}
+      - name: Verify bounded event anchors
+        if: inputs.execute
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MAX_WINDOWS: ${{ inputs.max_pending_windows_per_event }}
+        run: |
+          python scripts/run_boulder_anchor_discovery.py \
+            --pass verification \
+            --event-id ${{ matrix.event_id }} \
+            --required-source-manifest-sha256 8f6ce23cfd3da6d01ef75dbf795e24cba3040aee8aa143add8b7e69feadc8772 \
+            --discovery-checkpoint data/video_boulder_anchor_discovery_2026_v1/merged_review_windows.jsonl \
+            --required-discovery-checkpoint-sha256 49fdce904c9b5a720c14f38033253378def7b22d95b291ac0cb30b72daa0e3ab \
+            --verification-candidate-source anchors-only \
+            --contract-namespace boulder-anchor-verification-v4-frozen77-anchors1fps \
+            --model gemini-3.1-flash-lite \
+            --verification-seconds 60 \
+            --fps 1.0 \
+            --max-windows "$MAX_WINDOWS" \
+            --max-validation-retries 1 \
+            --max-transient-retries 2 \
+            --request-timeout-ms 900000 \
+            --continue-on-window-failure \
+            --execute \
+            --output-dir artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-${{ matrix.event_id }}
+      - name: Validate executed event checkpoint
+        if: inputs.execute
+        run: |
+          python scripts/validate_boulder_anchor_discovery.py \
+            artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-${{ matrix.event_id }}
+      - name: Save resumable event checkpoint
+        if: always()
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-${{ matrix.event_id }}
+          key: boulder-anchor-verification-v4-frozen77-anchors1fps-${{ github.ref_name }}-event${{ matrix.event_id }}-flash-lite-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Upload immutable event artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: boulder-anchor-verification-${{ matrix.event_slug }}-${{ matrix.event_id }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-${{ matrix.event_id }}/
+          if-no-files-found: error
+          retention-days: 90
+
+  merge-checkpoints:
+    if: inputs.execute
+    needs: verify-event
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Download Madrid checkpoint
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: boulder-anchor-verification-madrid-1479-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-1479
+      - name: Download Prague checkpoint
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: boulder-anchor-verification-prague-1480-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-1480
+      - name: Download Innsbruck checkpoint
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: boulder-anchor-verification-innsbruck-1482-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-1482
+      - name: Merge validated event checkpoints
+        run: |
+          python scripts/merge_boulder_anchor_verification_checkpoints.py \
+            --input-dir artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-1479 \
+            --input-dir artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-1480 \
+            --input-dir artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/event-1482 \
+            --output-dir artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/merged
+      - name: Upload immutable merged checkpoint
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: boulder-anchor-verification-merged-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/boulder-anchor-verification-v4/frozen77-anchors1fps/merged/
+          if-no-files-found: error
+          retention-days: 90

@@ -1,0 +1,60 @@
+{
+  "athlete_comparison_allowed": false,
+  "athlete_scoring_allowed": false,
+  "deterministic_order": "event_id, video_id, start_seconds, window_id",
+  "elo_update_allowed": false,
+  "merge_version": "ifsc-boulder-anchor-merge-v1",
+  "outputs": {
+    "coverage_summary_sha256": "2ef0af1b399dde4191b4181af36f534fb9c53d0ef2b3d31155ce693cf176e452",
+    "coverage_windows_sha256": "76a07f5c47090b8f9554f04a00e93f5d22a7f4c0d90891b6d64c83182e4d4e65",
+    "merged_failed_windows_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "merged_review_windows_sha256": "49fdce904c9b5a720c14f38033253378def7b22d95b291ac0cb30b72daa0e3ab",
+    "verification_window_plan_sha256": "5d651946300231bbf8c6f64aecd2f1f53af01bec3b6cec82533beeb7bb254c3c"
+  },
+  "production_use_allowed": false,
+  "sources": [
+    {
+      "checkpoint_contract_sha256": "24568cc893033b7e51bb0c040da2546460260b508cbd710a75cbad10381dfa3c",
+      "completed_window_count": 25,
+      "event_id": 1479,
+      "failed_windows_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "missing_window_count": 0,
+      "planned_window_count": 25,
+      "quarantined_window_count": 0,
+      "review_windows_sha256": "5e0e5bb22b7d5e2a475b283177bb945a8e7ea4ae499433674402eba3f19cce8e",
+      "run_manifest_sha256": "19dd3dd48156bd50068ed7f07a4aeca927c6bda2ec0e849e2ece5816ca821b29",
+      "run_status": "COMPLETE",
+      "source_checkpoint_id": "event-1479",
+      "window_plan_sha256": "ab7f83cb7b23942bf26b23ff71b225072c79f768c751cd330c52d8fea57715c3"
+    },
+    {
+      "checkpoint_contract_sha256": "b488a6378b23dbe24cdcbd4a0a543a876628dce80d2feed56352355394bc0b4f",
+      "completed_window_count": 26,
+      "event_id": 1480,
+      "failed_windows_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "missing_window_count": 0,
+      "planned_window_count": 26,
+      "quarantined_window_count": 0,
+      "review_windows_sha256": "5f9e8961954f49beaabe2c3c53217a7e54269ac7afd608e858f85d8cc4fd6cbd",
+      "run_manifest_sha256": "72cb3842db0f0dea466dce77c9018ba99d38cc2c0b67924090683ccbdddabb9c",
+      "run_status": "COMPLETE",
+      "source_checkpoint_id": "event-1480",
+      "window_plan_sha256": "e0190d3da4707025b4555e20c35317c4529651065f8cdbf825704f21fbb0047d"
+    },
+    {
+      "checkpoint_contract_sha256": "3641376052a26176765d9ec496362ae42d71c18503cae5309afa584be21e7aa3",
+      "completed_window_count": 26,
+      "event_id": 1482,
+      "failed_windows_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "missing_window_count": 0,
+      "planned_window_count": 26,
+      "quarantined_window_count": 0,
+      "review_windows_sha256": "8896357963c1750aae9f96e3fcadecc9553b16f0b0cbe5d45be8580602e1131e",
+      "run_manifest_sha256": "587e2bfbc9fc1f1562584bdeab624177a551771e0bac0b0c6b14a1b2e1e70483",
+      "run_status": "COMPLETE",
+      "source_checkpoint_id": "event-1482",
+      "window_plan_sha256": "948863cfb496864447dfe5427c4bbe1d4224b966c68ba8c544f941197ce1612a"
+    }
+  ],
+  "verification_executes_model": false
+}
