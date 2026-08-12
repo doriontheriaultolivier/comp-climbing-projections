@@ -37,6 +37,12 @@ The bundle also needs the seven frozen files in
 and `data/video_2026_source_manifest.csv` hash
 `8f6ce23cfd3da6d01ef75dbf795e24cba3040aee8aa143add8b7e69feadc8772`.
 
+The listed workflow hashes are the exact verified source transfer.  The clean
+release candidate then deliberately supersedes only their moving action tags
+with the reviewed immutable `checkout`, `setup-python`, `cache`,
+`upload-artifact`, and `download-artifact` commit IDs; no acquisition or
+model-request bound changed.
+
 ## Required acceptance
 
 1. `python scripts/validate_boulder_anchor_discovery_packet.py` passes.
