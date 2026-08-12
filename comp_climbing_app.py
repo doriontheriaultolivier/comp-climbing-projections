@@ -1210,6 +1210,58 @@ def selected_rows(athletes: pd.DataFrame, selection_ids: list[str]) -> pd.DataFr
     return athletes.loc[stable.isin(tokens) | legacy_global_ids.isin(tokens)].copy()
 
 
+def athlete_profile_integrity_status(
+    athlete: pd.Series,
+    athletes: pd.DataFrame,
+    history: pd.DataFrame,
+) -> dict[str, object]:
+    """Explain missing evidence without treating it as an ability estimate."""
+
+    global_id = str(athlete.get("global_id", "")).strip()
+    pool = str(athlete.get("pool", "")).strip()
+    name_key = str(athlete.get("name_key", "")).strip()
+    sibling_ids = sorted(
+        set(
+            athletes.loc[
+                athletes["pool"].astype(str).eq(pool)
+                & athletes["name_key"].astype(str).eq(name_key),
+                "global_id",
+            ].dropna().astype(str)
+        )
+    )
+    exact_history = history.loc[
+        history["global_id"].astype(str).eq(global_id)
+        & history["pool"].astype(str).eq(pool)
+    ]
+    rating_values = pd.to_numeric(
+        pd.Series([athlete.get(family, np.nan) for family in ALL_RATINGS]),
+        errors="coerce",
+    )
+    if exact_history.empty:
+        status = "NO_EXACT_HISTORY_LINK"
+        explanation = (
+            "No competition history is linked to this exact identity. This is "
+            "an identity/data-linkage status, not a zero or low ability rating."
+        )
+    elif rating_values.notna().sum() == 0:
+        status = "HISTORY_LINKED_MINIMUM_EVIDENCE_NOT_MET"
+        explanation = (
+            "Competition history is linked to this exact identity, but no rating "
+            "family met its minimum evidence rule."
+        )
+    else:
+        status = "RATING_EVIDENCE_AVAILABLE"
+        explanation = "At least one rating family has evidence for this exact identity."
+    return {
+        "status": status,
+        "explanation": explanation,
+        "global_id": global_id,
+        "exact_history_rows": int(len(exact_history)),
+        "same_name_identity_ids": sibling_ids,
+        "same_name_identity_collision": len(sibling_ids) > 1,
+    }
+
+
 def rating_help() -> str:
     return (
         "These rating families are diagnostic ledgers, not interchangeable "
@@ -2636,6 +2688,23 @@ def render_rating_detail(
         tabs = st.tabs([friendly_name(row["athlete_name"]) for _, row in focus.iterrows()])
         for tab, (_, athlete) in zip(tabs, focus.iterrows()):
             with tab:
+                integrity = athlete_profile_integrity_status(
+                    athlete, athletes, history
+                )
+                st.caption(
+                    f"Exact identity: {integrity['global_id']} Â· "
+                    f"linked history rows: {integrity['exact_history_rows']}"
+                )
+                if integrity["same_name_identity_collision"]:
+                    st.warning(
+                        "Multiple athlete IDs share this normalized name in the "
+                        "current data: "
+                        + ", ".join(integrity["same_name_identity_ids"])
+                        + ". Ratings are not combined until the identity is reviewed.",
+                        icon="âš ï¸",
+                    )
+                if integrity["status"] != "RATING_EVIDENCE_AVAILABLE":
+                    st.info(str(integrity["explanation"]))
                 metrics = st.columns(3)
                 for column, family in zip(metrics, RATING_ORDER):
                     value = athlete.get(family, np.nan)
