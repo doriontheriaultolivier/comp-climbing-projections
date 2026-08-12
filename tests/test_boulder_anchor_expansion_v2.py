@@ -1,6 +1,13 @@
 from __future__ import annotations
+
+from pathlib import Path
+
 import pandas as pd
 from scripts.plan_boulder_anchor_expansion_v2 import build_queue
+
+
+ROOT = Path(__file__).resolve().parents[1]
+UPLOAD_ARTIFACT_V7 = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
 
 def test_queues_only_verified_noninitial_semifinals_and_finals():
     frame = pd.DataFrame([
@@ -13,3 +20,10 @@ def test_queues_only_verified_noninitial_semifinals_and_finals():
     assert queue.iloc[0].batch_id == "boulder-anchor-expansion-v2-event-1478"
     assert not queue.iloc[0].execution_authorized
     assert not queue.iloc[0].external_transmission_authorized
+
+
+def test_expansion_workflow_uses_the_exact_reviewed_artifact_action():
+    workflow = (
+        ROOT / ".github/workflows/video-2026-boulder-anchor-expansion.yml"
+    ).read_text(encoding="utf-8")
+    assert f"actions/upload-artifact@{UPLOAD_ARTIFACT_V7}" in workflow
