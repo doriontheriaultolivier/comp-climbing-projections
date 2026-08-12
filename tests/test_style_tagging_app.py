@@ -53,6 +53,7 @@ class StyleTaggingAppTest(unittest.TestCase):
             )
         )
         self.assertIn("Save style-tag proposal", [button.label for button in app.button])
+        self.assertTrue(str(app.selectbox[3].value).startswith("Priority 1 ·"))
 
     def test_standalone_tagger_owns_its_data_path(self) -> None:
         self.assertEqual(module.DATA, PATH.parents[0] / "data")

@@ -306,9 +306,15 @@ def main() -> None:
         event_label = st.selectbox("Competition", event_labels)
         event_name = event_label.split(" — ", 1)[-1]
         event_rows = inventory.loc[inventory.event_name.eq(event_name)]
-        round_name = st.selectbox("Round", sorted(event_rows.round_group.dropna().astype(str).unique()))
+        round_name = st.selectbox(
+            "Round",
+            event_rows["round_group"].dropna().astype(str).drop_duplicates().tolist(),
+        )
         round_rows = event_rows.loc[event_rows.round_group.eq(round_name)]
-        terrain = st.selectbox("Terrain", sorted(round_rows.gender.dropna().astype(str).unique()))
+        terrain = st.selectbox(
+            "Terrain",
+            round_rows["gender"].dropna().astype(str).drop_duplicates().tolist(),
+        )
         terrain_rows = round_rows.loc[round_rows.gender.eq(terrain)]
         choices = terrain_rows.apply(problem_display, axis=1).tolist()
         chosen_display = st.selectbox("Boulder", choices)
