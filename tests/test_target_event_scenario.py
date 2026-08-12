@@ -33,6 +33,9 @@ def athlete_fixture() -> pd.DataFrame:
             "Global-ELO-Onsight": [1795.0, 1770.0, 1945.0, np.nan],
             "Global-ELO-Scramble": [1815.0, 1790.0, 1965.0, np.nan],
             "Global-ELO uncertainty": [90.0, 95.0, 80.0, 120.0],
+            "Global-ELO evidence": [9, 24, 52, 3],
+            "age": [20.0, 27.0, 31.0, np.nan],
+            "cnr_rank": [4.0, np.nan, np.nan, np.nan],
         }
     )
 
@@ -80,6 +83,9 @@ def test_joint_scenario_is_deterministic_coherent_and_monotone() -> None:
         atol=1e-12,
     )
     assert first["seed"] == second["seed"]
+    assert set(opponents["Opponent eligible rating rounds"]) == {24.0, 52.0}
+    assert set(opponents["Opponent age"]) == {27.0, 31.0}
+    assert summary.loc[summary["Athlete"].eq("Focus Athlete"), "CNR rank (context only)"].iloc[0] == 4.0
 
 
 def test_missing_specialist_is_withheld_not_replaced_by_global_rating() -> None:
@@ -131,3 +137,6 @@ def test_target_scenario_ui_states_conditionality_and_limits() -> None:
     ]
     assert len(opponent_tables) == 1
     assert len(opponent_tables[0]) == 2
+    assert "Opponent support" in opponent_tables[0].columns
+    assert opponent_tables[0]["Opponent support"].str.contains("rounds | SD", regex=False).all()
+    assert any("no minimum-round truth switch" in item for item in captions)

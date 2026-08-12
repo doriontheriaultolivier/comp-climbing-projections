@@ -259,6 +259,19 @@ def simulate_target_event_scenario(
     rng = np.random.default_rng(seed)
     mean = rows["_scenario_rating"].to_numpy(float)
     uncertainty = rows["_scenario_uncertainty"].to_numpy(float)
+    evidence = pd.to_numeric(
+        rows.get(
+            f"{rating_column} evidence",
+            pd.Series(np.nan, index=rows.index),
+        ),
+        errors="coerce",
+    ).to_numpy(float)
+    age = pd.to_numeric(
+        rows.get("age", pd.Series(np.nan, index=rows.index)), errors="coerce"
+    ).to_numpy(float)
+    cnr_rank = pd.to_numeric(
+        rows.get("cnr_rank", pd.Series(np.nan, index=rows.index)), errors="coerce"
+    ).to_numpy(float)
     noise = rng.normal(
         0.0,
         np.sqrt(uncertainty**2 + event_sd**2),
@@ -285,6 +298,9 @@ def simulate_target_event_scenario(
             "Athlete": rows["athlete_name"].map(friendly_name),
             "Rating": mean,
             "Rating uncertainty": uncertainty,
+            "Eligible rating rounds": evidence,
+            "Age": age,
+            "CNR rank (context only)": cnr_rank,
             "P(win)": cumulative[:, 0],
             "P(top 3)": cumulative[:, min(3, len(rows)) - 1],
             "P(top 8)": cumulative[:, min(8, len(rows)) - 1],
@@ -299,6 +315,11 @@ def simulate_target_event_scenario(
             "Focus beats opponent": focus_beats[opponent_mask],
             "Opponent beats focus": 1.0 - focus_beats[opponent_mask],
             "Opponent rating": mean[opponent_mask],
+            "Rating gap (focus - opponent)": mean[focus_index] - mean[opponent_mask],
+            "Opponent rating uncertainty": uncertainty[opponent_mask],
+            "Opponent eligible rating rounds": evidence[opponent_mask],
+            "Opponent age": age[opponent_mask],
+            "Opponent CNR rank (context only)": cnr_rank[opponent_mask],
         }
     ).sort_values("Focus beats opponent", kind="stable")
     return {
@@ -2490,11 +2511,63 @@ def render_target_event_scenario(
         opponent_display["Opponent rating"] = opponent_display["Opponent rating"].map(
             lambda value: f"{value:.0f}"
         )
+        opponent_display["Rating gap (focus - opponent)"] = opponent_display[
+            "Rating gap (focus - opponent)"
+        ].map(lambda value: f"{value:+.0f}")
+        opponent_display["Opponent rating uncertainty"] = opponent_display[
+            "Opponent rating uncertainty"
+        ].map(lambda value: f"{value:.0f}")
+        for column in (
+            "Opponent eligible rating rounds",
+            "Opponent age",
+            "Opponent CNR rank (context only)",
+        ):
+            opponent_display[column] = opponent_display[column].map(
+                lambda value: "â€”" if pd.isna(value) else f"{value:.0f}"
+            )
+        opponent_display["Opponent support"] = [
+            f"{rounds} rounds | SD {uncertainty} | age {age} | CNR {cnr}"
+            for rounds, uncertainty, age, cnr in zip(
+                opponent_display["Opponent eligible rating rounds"],
+                opponent_display["Opponent rating uncertainty"],
+                opponent_display["Opponent age"],
+                opponent_display["Opponent CNR rank (context only)"],
+            )
+        ]
+        opponent_display = opponent_display.drop(columns=[
+            "Opponent rating uncertainty",
+            "Opponent eligible rating rounds",
+            "Opponent age",
+            "Opponent CNR rank (context only)",
+        ])
         st.markdown("**Named-opponent probabilities**")
         st.dataframe(
             opponent_display.drop(columns="selection_id"),
             hide_index=True,
             width="stretch",
+        )
+        focus_evidence = pd.to_numeric(
+            focus_row.get(f"{rating_column} evidence", np.nan), errors="coerce"
+        )
+        focus_uncertainty = pd.to_numeric(
+            focus_row.get("Global-ELO uncertainty", np.nan), errors="coerce"
+        )
+        st.caption(
+            "Support context: "
+            + (
+                f"the focus rating uses {int(focus_evidence)} eligible rounds and "
+                if np.isfinite(focus_evidence)
+                else "the focus eligible-round count is unavailable and "
+            )
+            + (
+                f"has declared rating SD {focus_uncertainty:.0f}. "
+                if np.isfinite(focus_uncertainty)
+                else "has no displayed rating-SD summary. "
+            )
+            + "Opponent columns expose the same support continuously; there is no "
+            "minimum-round truth switch. Round counts are correlated observations, "
+            "not independent competitions. Age and CNR are diagnostics only and do "
+            "not enter this probability calculation."
         )
         with st.expander("Selected-field placement distribution"):
             placement_display = summary.sort_values(
