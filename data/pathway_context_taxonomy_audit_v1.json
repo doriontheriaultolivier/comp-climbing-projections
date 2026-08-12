@@ -1,0 +1,48 @@
+{
+  "schema": "pathway-context-taxonomy-audit-v1",
+  "status": "RESEARCH_TAXONOMY_ONLY",
+  "input": {
+    "path": "data\\athlete_age_progression.csv.gz",
+    "sha256": "ca1322d77fe267f10b0e173e5dcb6f307cada8051a52889bf1e649e5bca92edf",
+    "result_rows": 415035,
+    "unique_event_contexts": 3421
+  },
+  "direct_event_context_counts": {
+    "SHARED_BRIDGE_ONLY": 914,
+    "WC": 441,
+    "FED:FASI": 354,
+    "FED:USAC:YOUTH": 299,
+    "FED:SAC-CAS": 285,
+    "IFSC_REG:EUROPE:YOUTH": 218,
+    "FED:FASI:YOUTH": 181,
+    "FED:SAC-CAS:YOUTH": 144,
+    "QUARANTINE": 141,
+    "FED:CEC:YOUTH": 122,
+    "IFSC_REG:EUROPE": 71,
+    "FED:FEDME": 62,
+    "FED:CEC": 56,
+    "IFSC_REG:ASIA": 33,
+    "FED:USAC": 25,
+    "WC:YOUTH": 19,
+    "NACS": 18,
+    "IFSC_REG:ASIA:YOUTH": 15,
+    "IFSC_REG:OCEANIA": 8,
+    "IFSC_REG:PAN_AMERICA": 5,
+    "OLYM_SCENARIO_INPUT": 3,
+    "IFSC_REG:OCEANIA:YOUTH": 3,
+    "IFSC_REG:AFRICA": 2,
+    "NACS:YOUTH": 2
+  },
+  "invariants": {
+    "all_results_update_shared_skill": true,
+    "direct_label_is_not_an_input_filter": true,
+    "standalone_olympic_head_fitted": false,
+    "ambiguous_region_auto_assigned": false
+  },
+  "next_gate": "Review unresolved context events, then compare fully pooled, isolated, fixed-offset, and partially pooled context-head models chronologically.",
+  "authority": {
+    "model_fit": false,
+    "rating_promotion": false,
+    "deployment": false
+  }
+}
