@@ -142,7 +142,9 @@ def problem_inventory() -> pd.DataFrame:
     frame = pd.read_csv(path, low_memory=False)
     frame["event_name"] = frame["event_name"].fillna("").astype(str).str.strip()
     frame["event_date"] = pd.to_datetime(frame["event_date"], errors="coerce")
-    priority_path = DATA / "physical_item_tagging_priority_v1.csv"
+    priority_path = DATA / "physical_item_tagging_priority_v1_1.csv"
+    if not priority_path.exists():
+        priority_path = DATA / "physical_item_tagging_priority_v1.csv"
     priority = pd.read_csv(priority_path, low_memory=False) if priority_path.exists() else pd.DataFrame()
     return apply_tagging_priority(frame.loc[frame["event_name"].ne("")], priority)
 
@@ -156,6 +158,9 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
     rows["priority_source_items"] = pd.NA
     rows["priority_linked_athletes"] = pd.NA
     rows["priority_linked_outcomes"] = pd.NA
+    rows["priority_board_linked_outcomes"] = 0
+    rows["priority_top_given_zone_pairs"] = 0
+    rows["priority_zone_pairs"] = 0
     required = {
         "source_scope", "source_event_id", "source_round_id", "boulder_number",
         "priority_rank", "linked_athletes", "linked_outcomes",
@@ -169,23 +174,49 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
         keys = ["source_scope", "source_event_id", "source_round_id", "boulder_number"]
         for column in keys:
             expanded[column] = expanded[column].astype(str).str.strip()
-        queue = priority[list(required)].copy()
+        optional = {
+            "board_linked_outcomes": "priority_board_linked_outcomes",
+            "top_given_zone_discordant_pairs": "priority_top_given_zone_pairs",
+            "zone_discordant_pairs": "priority_zone_pairs",
+        }
+        queue_columns = list(required) + [
+            column for column in optional if column in priority.columns
+        ]
+        queue = priority[queue_columns].copy()
         for column in keys:
             queue[column] = queue[column].astype(str).str.strip()
         matched = expanded.merge(queue, on=keys, how="inner")
         if not matched.empty:
+            aggregations = {
+                "priority_rank": ("priority_rank", "min"),
+                "priority_source_items": ("priority_rank", "count"),
+                "priority_linked_athletes": ("linked_athletes", "max"),
+                "priority_linked_outcomes": ("linked_outcomes", "sum"),
+            }
+            aggregations.update(
+                {
+                    output: (source, "sum")
+                    for source, output in optional.items()
+                    if source in matched.columns
+                }
+            )
             attached = matched.groupby("_inventory_index", as_index=False).agg(
-                priority_rank=("priority_rank", "min"),
-                priority_source_items=("priority_rank", "count"),
-                priority_linked_athletes=("linked_athletes", "max"),
-                priority_linked_outcomes=("linked_outcomes", "sum"),
+                **aggregations,
             )
             rows = rows.drop(
                 columns=[
                     "priority_rank", "priority_source_items",
                     "priority_linked_athletes", "priority_linked_outcomes",
+                    "priority_board_linked_outcomes",
+                    "priority_top_given_zone_pairs", "priority_zone_pairs",
                 ]
             ).merge(attached, on="_inventory_index", how="left")
+    for column in (
+        "priority_board_linked_outcomes",
+        "priority_top_given_zone_pairs",
+        "priority_zone_pairs",
+    ):
+        rows[column] = rows[column].fillna(0).astype(int)
     rows["priority_status"] = rows["priority_rank"].notna().map(
         {True: "Physical-transfer priority", False: "General governed inventory"}
     )
@@ -254,11 +285,20 @@ def main() -> None:
         return
     prioritized = inventory.loc[inventory["priority_rank"].notna()]
     source_priority_items = int(prioritized["priority_source_items"].fillna(0).sum())
+    top_pair_tasks = int(prioritized["priority_top_given_zone_pairs"].gt(0).sum())
+    top_pairs = int(prioritized["priority_top_given_zone_pairs"].sum())
+    zone_pairs = int(prioritized["priority_zone_pairs"].sum())
     st.caption(
         f"{len(prioritized):,} governed Boulder tagging tasks cover all "
         f"{source_priority_items:,} physical/Kilter priority source items. Shared terrain "
         "lets one reviewed tag serve multiple source records; priority is continuous, not "
         "an inclusion cutoff."
+    )
+    st.caption(
+        f"The evidence-rich first layer is {top_pair_tasks:,} tasks covering "
+        f"{top_pairs:,} exact both-board Top-given-Zone comparisons; the full queue "
+        f"also covers {zone_pairs:,} Zone comparisons. This orders human review by "
+        "expected evidence reuse, not by athlete importance."
     )
     events = inventory[["event_name", "event_date"]].drop_duplicates()
     event_labels = [f"{row.event_date.date().isoformat() if pd.notna(row.event_date) else 'Date unknown'} — {row.event_name}" for row in events.itertuples(index=False)]
@@ -283,6 +323,14 @@ def main() -> None:
                 f"{int(selected_problem['priority_linked_athletes'])} athletes. This is a "
                 "review-efficiency heuristic, not model evidence."
             )
+            top_pairs_for_task = int(selected_problem.get("priority_top_given_zone_pairs", 0))
+            zone_pairs_for_task = int(selected_problem.get("priority_zone_pairs", 0))
+            if top_pairs_for_task or zone_pairs_for_task:
+                st.caption(
+                    f"Expected exact-item reuse: {top_pairs_for_task} "
+                    f"Top-given-Zone pair{'s' if top_pairs_for_task != 1 else ''} and "
+                    f"{zone_pairs_for_task} Zone pair{'s' if zone_pairs_for_task != 1 else ''}."
+                )
         confidence = st.select_slider("Confidence", options=("Low", "Moderate", "High"), value="Moderate")
         directions = st.columns(2)
         pre_direction = directions[0].selectbox("Start to Zone direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))
