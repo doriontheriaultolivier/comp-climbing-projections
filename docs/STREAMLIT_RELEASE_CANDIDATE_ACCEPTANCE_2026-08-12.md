@@ -12,7 +12,7 @@ divergent and actively dirty.
 | Check | Result |
 | --- | --- |
 | Focused app smoke and style-tagger tests | 14 passed, 13 subtests passed |
-| Full clean-branch test suite | 23 passed, 13 subtests passed |
+| Full consolidated release-candidate test suite | 25 passed, 13 subtests passed |
 | `py_compile` (`streamlit_app.py`, `comp_climbing_app.py`, `style_tagging_app.py`) | Passed |
 | Local Streamlit `/_stcore/health` | HTTP 200, `ok` |
 | Olympics default view | Deterministic across two fresh AppTest sessions; all four athlete-set caption modes verified semantically |
@@ -22,6 +22,12 @@ that changed under compatible dependency versions allowed by `requirements.txt`.
 It replaces it with a same-environment fresh-render determinism assertion while
 retaining the visible-content checks for the comparison, EEQ, youth and
 Canadian-proxy views.
+
+The candidate also makes `style_tagging_app.py` genuinely standalone: it owns
+its governed local inventory path and no longer imports the projection app just
+to find `data/`.  Its Streamlit entrypoint is smoke-tested with the inventory,
+so an unrelated projection-app import error cannot prevent the tagger from
+starting.
 
 ## Deliberate non-actions
 
