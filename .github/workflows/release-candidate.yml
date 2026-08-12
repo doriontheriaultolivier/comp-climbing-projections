@@ -1,0 +1,35 @@
+name: Release candidate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - codex/deployment-acceptance
+
+permissions:
+  contents: read
+
+jobs:
+  private-streamlit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install release dependencies
+        run: python -m pip install -r requirements.txt pytest pytest-subtests
+      - name: Compile release entry points
+        run: >-
+          python -m py_compile
+          streamlit_app.py
+          comp_climbing_app.py
+          style_tagging_app.py
+      - name: Run release acceptance tests
+        run: >-
+          python -m pytest -q
+          tests/test_app_smoke.py
+          tests/test_style_tagging_app.py
+          tests/test_joint_temperature_shadow.py
