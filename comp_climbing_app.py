@@ -618,6 +618,88 @@ def quarantine_obvious_fixture_exposure(
     return safe_athletes, safe_history, audit
 
 
+def senior_wc_direct_evidence_mask(history: pd.DataFrame) -> pd.Series:
+    """Identify only direct Senior/Open World-level Boulder evidence.
+
+    Youth Worlds are valuable graph evidence but are never direct senior-WC
+    evidence. Continental/Pan-American Series are also transfer evidence, not
+    senior World Cup starts. The legacy WC+-ELO artifact predated this semantic
+    distinction, so the public app withholds it when no direct rows exist.
+    """
+
+    if history.empty:
+        return pd.Series(False, index=history.index, dtype=bool)
+    names = history.get(
+        "event_name", pd.Series("", index=history.index, dtype="string")
+    ).astype("string")
+    senior_name = names.str.contains(
+        r"(?i)\b(?:world\s+(?:climbing\s+)?(?:cup|series|championships?)|"
+        r"olympic(?:\s+qualifier)?(?:\s+series)?|oqs)\b",
+        regex=True,
+        na=False,
+    )
+    youth = names.str.contains(r"(?i)\byouth\b", regex=True, na=False)
+    source = history.get(
+        "source_scope", pd.Series("", index=history.index, dtype="string")
+    ).astype("string").str.upper()
+    return source.eq("IFSC") & senior_name & ~youth
+
+
+def withhold_legacy_wc_without_direct_evidence(
+    athletes: pd.DataFrame,
+    history: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Blank legacy WC values that can be mistaken for demonstrated evidence."""
+
+    safe = athletes.copy()
+    wc_columns = [column for column in safe if column.startswith("WC+-ELO")]
+    if safe.empty or not wc_columns:
+        safe["direct_senior_wc_competitions"] = 0
+        safe["legacy_wc_display_status"] = "NO_LEGACY_WC_COLUMNS"
+        return safe, pd.DataFrame([{
+            "athletes_with_legacy_wc_before": 0,
+            "athletes_with_direct_senior_wc": 0,
+            "legacy_wc_rows_withheld": 0,
+        }])
+    direct_rows = history.loc[senior_wc_direct_evidence_mask(history)].copy()
+    if direct_rows.empty:
+        counts = pd.DataFrame(
+            columns=["pool", "global_id", "direct_senior_wc_competitions"]
+        )
+    else:
+        direct_rows["_competition_key"] = (
+            direct_rows["source_scope"].astype(str)
+            + "|"
+            + direct_rows["source_event_id"].astype(str)
+        )
+        counts = (
+            direct_rows.groupby(["pool", "global_id"], as_index=False)
+            ["_competition_key"]
+            .nunique()
+            .rename(columns={"_competition_key": "direct_senior_wc_competitions"})
+        )
+    safe = safe.merge(counts, on=["pool", "global_id"], how="left")
+    safe["direct_senior_wc_competitions"] = pd.to_numeric(
+        safe["direct_senior_wc_competitions"], errors="coerce"
+    ).fillna(0).astype(int)
+    legacy_before = safe[wc_columns].notna().any(axis=1)
+    withhold = legacy_before & safe["direct_senior_wc_competitions"].eq(0)
+    safe.loc[withhold, wc_columns] = np.nan
+    safe["legacy_wc_display_status"] = np.where(
+        safe["direct_senior_wc_competitions"].gt(0),
+        "DIRECT_SENIOR_WC_EVIDENCE",
+        "WITHHELD_NO_DIRECT_SENIOR_WC_EVIDENCE",
+    )
+    audit = pd.DataFrame([{
+        "athletes_with_legacy_wc_before": int(legacy_before.sum()),
+        "athletes_with_direct_senior_wc": int(
+            safe["direct_senior_wc_competitions"].gt(0).sum()
+        ),
+        "legacy_wc_rows_withheld": int(withhold.sum()),
+    }])
+    return safe, audit
+
+
 def load_current_wc_projection_artifact(
     data_dir: Path = DATA,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
@@ -913,9 +995,13 @@ def read_data() -> dict[str, object]:
     safe_athletes, safe_history, fixture_audit = quarantine_obvious_fixture_exposure(
         output["athletes"], output["history"]
     )
+    safe_athletes, wc_evidence_audit = withhold_legacy_wc_without_direct_evidence(
+        safe_athletes, safe_history
+    )
     output["athletes"] = safe_athletes
     output["history"] = safe_history
     output["fixture_quarantine"] = fixture_audit
+    output["legacy_wc_evidence_audit"] = wc_evidence_audit
     return output
 
 
@@ -1267,7 +1353,9 @@ def rating_help() -> str:
         "These rating families are diagnostic ledgers, not interchangeable "
         "probability scales. Global-ELO uses every de-duplicated Boulder result. "
         "IFSC-ELO uses IFSC results only. WC+-ELO uses World Cups/"
-        "World Series, World Championships and Olympic-pathway events. The actual "
+        "senior World Series, senior World Championships and Olympic-pathway "
+        "events; Youth Worlds are separate transfer evidence. Legacy WC values "
+        "are withheld when an identity has no direct senior-WC competition. The actual "
         "IFSC World Ranking remains a separate rank/points field. Specialist ratings are shown only "
         "with at least two eligible rounds and enough athletes to calibrate the "
         "family; they shrink toward Global-ELO while evidence is limited. "
