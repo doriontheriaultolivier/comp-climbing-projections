@@ -24,7 +24,50 @@
   ],
   "cnr": {
     "available_for_event_date_calibration": false,
-    "interpretation": "CNR remains pathway context only; the frozen pair panel cannot estimate event-date CNR calibration and missing ranks are never encoded as zero."
+    "canadian_strict_prior_subset": {
+      "athlete_starts": 85,
+      "athletes": 12,
+      "fixed_adjustment_supported": false,
+      "moderate_offset_diagnostics": [
+        {
+          "cnr_logit_offset": 0.25,
+          "log_loss_delta": 0.016535,
+          "log_loss_delta_ci95": [
+            -0.020797,
+            0.053866
+          ],
+          "pairs": 9,
+          "physical_events": 5,
+          "year": 2024
+        },
+        {
+          "cnr_logit_offset": 0.25,
+          "log_loss_delta": -0.01379,
+          "log_loss_delta_ci95": [
+            -0.025643,
+            -0.000066
+          ],
+          "pairs": 40,
+          "physical_events": 7,
+          "year": 2025
+        },
+        {
+          "cnr_logit_offset": 0.25,
+          "log_loss_delta": 0.000467,
+          "log_loss_delta_ci95": [
+            -0.023472,
+            0.043606
+          ],
+          "pairs": 24,
+          "physical_events": 5,
+          "year": 2026
+        }
+      ],
+      "physical_events": 17,
+      "rankable_pairs": 73,
+      "status": "retrospective_continuous_support_mixed_by_year"
+    },
+    "interpretation": "The global frozen pair panel has no event-date CNR. A separate strict-prior Canadian subset retains sparse evidence continuously: CNR residual direction reverses across 2024, 2025 and 2026, so no fixed adjustment is applied and missing ranks are never encoded as zero."
   },
   "evaluation": {
     "bootstrap_draws": 300,
@@ -112,6 +155,8 @@
   "schema": "boulder-probability-spectrum-shadow-v1",
   "source_bindings": {
     "calibration_spectrum_sha256": "11b73606a12af481717fdb955b35e633b4c3c2b2f85765967abd796d747988cc",
+    "cnr_continuous_support_report_sha256": "de2a65d9ce4ad41c628cc67bf61b4c78cea80c23975f0098d5d654cbe1aa6875",
+    "cnr_continuous_support_sensitivity_sha256": "c4a17aae739b7b070cf750b93fae8ad1899d5370a3dcd100a908565bd62d6fd3",
     "named_pair_artifact_sha256": "4fdc42232c65fc0522fa1c4c74bf78d67d342c27e58397a6199b4899d4a4b78d",
     "prospective_pair_output_sha256": "e33b51b5dddc6bf288c86f2f10f3922728fd6f837e135ca56483b386f7cad2e7"
   },
@@ -119,6 +164,7 @@
   "use_limits": [
     "age residuals are not causal age effects",
     "CNR is not a fitted probability input",
+    "the strict-prior Canadian CNR residual changes direction by year",
     "temperature is candidate-family and chronology specific",
     "this artifact does not authorize betting or public production claims"
   ]
