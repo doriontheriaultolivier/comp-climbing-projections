@@ -1,1 +1,5 @@
 data/canadian_current_wc_projection_v3_youth_world_complete.csv binary
+data/video_boulder_anchor_discovery_2026_v1/*.csv text eol=lf
+data/video_boulder_anchor_discovery_2026_v1/*.json text eol=lf
+data/video_boulder_anchor_discovery_2026_v1/*.jsonl text eol=lf
+data/video_boulder_anchor_discovery_2026_v1/*.md text eol=lf

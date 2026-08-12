@@ -1,0 +1,125 @@
+{
+  "age_diagnostics": [
+    {
+      "age_band": "18–21",
+      "events": 1307,
+      "forecast_mean": 0.497457,
+      "observed_rate": 0.553495,
+      "observed_minus_forecast": 0.056038
+    },
+    {
+      "age_band": "22–26",
+      "events": 702,
+      "forecast_mean": 0.507205,
+      "observed_rate": 0.581059,
+      "observed_minus_forecast": 0.073854
+    },
+    {
+      "age_band": "32+",
+      "events": 312,
+      "forecast_mean": 0.503903,
+      "observed_rate": 0.459413,
+      "observed_minus_forecast": -0.04449
+    }
+  ],
+  "cnr": {
+    "available_for_event_date_calibration": false,
+    "interpretation": "CNR remains pathway context only; the frozen pair panel cannot estimate event-date CNR calibration and missing ranks are never encoded as zero."
+  },
+  "evaluation": {
+    "bootstrap_draws": 300,
+    "bootstrap_unit": "competition_field",
+    "canonical_pairs": 1164644,
+    "competition_fields": 3749,
+    "years": [
+      2025,
+      2026
+    ]
+  },
+  "prospective_temperature": [
+    {
+      "fit_years": [
+        2024
+      ],
+      "log_loss_delta": -0.00886,
+      "log_loss_delta_ci95": [
+        -0.0101,
+        -0.00747
+      ],
+      "temperature": 3.002,
+      "test_year": 2025
+    },
+    {
+      "fit_years": [
+        2024,
+        2025
+      ],
+      "log_loss_delta": -0.01529,
+      "log_loss_delta_ci95": [
+        -0.01749,
+        -0.01323
+      ],
+      "temperature": 3.444,
+      "test_year": 2026
+    }
+  ],
+  "rating_diagnostics": [
+    {
+      "comparison": "Higher-rated vs lower-rated",
+      "events": 3328,
+      "forecast_mean": 0.51558,
+      "observed_rate": 0.683127,
+      "observed_minus_forecast": 0.167547,
+      "observed_minus_forecast_ci95": [
+        0.160605,
+        0.173123
+      ]
+    },
+    {
+      "comparison": "High-tertile vs low-tertile",
+      "events": 2492,
+      "forecast_mean": 0.518791,
+      "observed_rate": 0.834023,
+      "observed_minus_forecast": 0.315232,
+      "observed_minus_forecast_ci95": [
+        0.307593,
+        0.323616
+      ]
+    },
+    {
+      "comparison": "High-tertile vs middle-tertile",
+      "events": 1707,
+      "forecast_mean": 0.510325,
+      "observed_rate": 0.758527,
+      "observed_minus_forecast": 0.248202,
+      "observed_minus_forecast_ci95": [
+        0.235042,
+        0.258947
+      ]
+    },
+    {
+      "comparison": "Middle-tertile vs low-tertile",
+      "events": 1936,
+      "forecast_mean": 0.503424,
+      "observed_rate": 0.717096,
+      "observed_minus_forecast": 0.213672,
+      "observed_minus_forecast_ci95": [
+        0.201802,
+        0.225778
+      ]
+    }
+  ],
+  "schema": "boulder-probability-spectrum-shadow-v1",
+  "source_bindings": {
+    "calibration_spectrum_sha256": "11b73606a12af481717fdb955b35e633b4c3c2b2f85765967abd796d747988cc",
+    "named_pair_artifact_sha256": "4fdc42232c65fc0522fa1c4c74bf78d67d342c27e58397a6199b4899d4a4b78d",
+    "prospective_pair_output_sha256": "e33b51b5dddc6bf288c86f2f10f3922728fd6f837e135ca56483b386f7cad2e7"
+  },
+  "status": "LOCKED_AGGREGATE_RESEARCH_DIAGNOSTIC",
+  "use_limits": [
+    "age residuals are not causal age effects",
+    "CNR is not a fitted probability input",
+    "temperature is candidate-family and chronology specific",
+    "this artifact does not authorize betting or public production claims"
+  ]
+}
