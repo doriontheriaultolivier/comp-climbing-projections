@@ -153,6 +153,7 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
     rows = inventory.copy().reset_index(drop=True)
     rows["_inventory_index"] = rows.index
     rows["priority_rank"] = pd.NA
+    rows["priority_source_items"] = pd.NA
     rows["priority_linked_athletes"] = pd.NA
     rows["priority_linked_outcomes"] = pd.NA
     required = {
@@ -175,11 +176,15 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
         if not matched.empty:
             attached = matched.groupby("_inventory_index", as_index=False).agg(
                 priority_rank=("priority_rank", "min"),
+                priority_source_items=("priority_rank", "count"),
                 priority_linked_athletes=("linked_athletes", "max"),
                 priority_linked_outcomes=("linked_outcomes", "sum"),
             )
             rows = rows.drop(
-                columns=["priority_rank", "priority_linked_athletes", "priority_linked_outcomes"]
+                columns=[
+                    "priority_rank", "priority_source_items",
+                    "priority_linked_athletes", "priority_linked_outcomes",
+                ]
             ).merge(attached, on="_inventory_index", how="left")
     rows["priority_status"] = rows["priority_rank"].notna().map(
         {True: "Physical-transfer priority", False: "General governed inventory"}
@@ -248,9 +253,12 @@ def main() -> None:
         st.error("The governed boulder inventory is unavailable; tagging is disabled until it is restored.")
         return
     prioritized = inventory.loc[inventory["priority_rank"].notna()]
+    source_priority_items = int(prioritized["priority_source_items"].fillna(0).sum())
     st.caption(
-        f"{len(prioritized):,} governed Boulder slots overlap the physical/Kilter "
-        "transfer queue. Priority is continuous, not an inclusion cutoff."
+        f"{len(prioritized):,} governed Boulder tagging tasks cover all "
+        f"{source_priority_items:,} physical/Kilter priority source items. Shared terrain "
+        "lets one reviewed tag serve multiple source records; priority is continuous, not "
+        "an inclusion cutoff."
     )
     events = inventory[["event_name", "event_date"]].drop_duplicates()
     event_labels = [f"{row.event_date.date().isoformat() if pd.notna(row.event_date) else 'Date unknown'} — {row.event_name}" for row in events.itertuples(index=False)]
@@ -267,10 +275,13 @@ def main() -> None:
         selected_problem = terrain_rows.loc[terrain_rows.apply(problem_display, axis=1).eq(chosen_display)].iloc[0].to_dict()
         st.caption(f"{selected_problem['boulder_count_status']} count: {int(selected_problem['boulder_count'])}; terrain: {selected_problem['terrain_group']}")
         if pd.notna(selected_problem.get("priority_rank")):
+            source_items = int(selected_problem.get("priority_source_items", 1))
             st.info(
                 f"Physical-transfer priority {int(selected_problem['priority_rank'])}: "
-                f"this tag can be reused across {int(selected_problem['priority_linked_athletes'])} "
-                "linked athletes. This is a review-efficiency heuristic, not model evidence."
+                f"this tagging task covers {source_items} exact source item"
+                f"{'s' if source_items != 1 else ''}; each source item links up to "
+                f"{int(selected_problem['priority_linked_athletes'])} athletes. This is a "
+                "review-efficiency heuristic, not model evidence."
             )
         confidence = st.select_slider("Confidence", options=("Low", "Moderate", "High"), value="Moderate")
         directions = st.columns(2)

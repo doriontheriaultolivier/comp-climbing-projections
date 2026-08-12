@@ -39,6 +39,13 @@ class StyleTaggingAppTest(unittest.TestCase):
             [control.label for control in app.selectbox[:4]],
             ["Competition", "Round", "Terrain", "Boulder"],
         )
+        coverage_captions = [caption.value for caption in app.caption]
+        self.assertTrue(
+            any(
+                "489 governed Boulder tagging tasks cover all 535" in caption
+                for caption in coverage_captions
+            )
+        )
         self.assertIn("Save style-tag proposal", [button.label for button in app.button])
 
     def test_standalone_tagger_owns_its_data_path(self) -> None:
@@ -88,14 +95,23 @@ class StyleTaggingAppTest(unittest.TestCase):
                 "round_group": "Qualification", "gender": "Men",
             },
         ])
-        priority = pd.DataFrame([{
-            "source_scope": "CEC", "source_event_id": 224,
-            "source_round_id": 4420, "boulder_number": 3,
-            "priority_rank": 2, "linked_athletes": 7, "linked_outcomes": 7,
-        }])
+        priority = pd.DataFrame([
+            {
+                "source_scope": "CEC", "source_event_id": 224,
+                "source_round_id": 4420, "boulder_number": 3,
+                "priority_rank": 2, "linked_athletes": 7, "linked_outcomes": 7,
+            },
+            {
+                "source_scope": "CEC", "source_event_id": 224,
+                "source_round_id": 4418, "boulder_number": 3,
+                "priority_rank": 5, "linked_athletes": 5, "linked_outcomes": 5,
+            },
+        ])
         result = module.apply_tagging_priority(inventory, priority)
         self.assertEqual(result.iloc[0]["priority_rank"], 2)
+        self.assertEqual(result.iloc[0]["priority_source_items"], 2)
         self.assertEqual(result.iloc[0]["priority_linked_athletes"], 7)
+        self.assertEqual(result.iloc[0]["priority_linked_outcomes"], 12)
         self.assertEqual(result.iloc[1]["priority_status"], "General governed inventory")
         self.assertEqual(len(result), 2)
 
