@@ -32,16 +32,16 @@ For pathway context `c`, simulate event-balanced reference fields using only
 past eligible competitions. Find latent abilities:
 
 - `s_semi,c`: average `P(reach semifinal | start, reference field)=0.50`;
-- `s_win,c`: average `P(win | start, reference field)=0.50`.
+- `s_final,c`: average `P(reach final | start, reference field)=0.50`.
 
 Then display:
 
-`R_c(s) = 2000 + 1000 * (s - s_semi,c) / (s_win,c - s_semi,c)`.
+`R_c(s) = 2000 + 1000 * (s - s_semi,c) / (s_final,c - s_semi,c)`.
 
 This gives the proposed interpretations exactly:
 
 - 2000 = 50% semifinal probability;
-- 3000 = 50% win probability.
+- 3000 = 50% final probability.
 
 It is a good communication layer because the distance now has a pathway-specific
 meaning. It does **not** by itself fix calibration: any affine transform can
@@ -64,10 +64,12 @@ On refresh, use a rolling multi-event reference or a partially pooled yearly
 reference. Preserve the old anchors so changes can be decomposed into athlete
 change versus reference-field change.
 
-If a context never crosses 50% win probability inside supported ability, 3000
-is extrapolative. The product must show `win anchor not estimable` rather than
-manufacture a number. FED heads with small fields and the Olympic scenario are
-especially vulnerable.
+The original 50%-win proposal is rejected as the display anchor: it is often a
+tail extrapolation, moves sharply with field size and dominant outliers, and is
+least stable in the sparse contexts where interpretability matters most. Win
+probability remains a direct model output with uncertainty. If 50%-final is not
+identified inside supported ability for a pathway, the product must show
+`upper anchor not estimable` rather than manufacture a number.
 
 ## Model structure
 
@@ -119,6 +121,7 @@ graphs. Always display uncertainty, direct event count and transfer route.
 ## Decision
 
 Explore and implement the four evidence-bearing heads. Keep `OLYM` as a
-conditional scenario. Use the 2000/3000 anchors as an interpretable display
-contract after probability calibration, not as the mechanism that creates
-separation. No current rating is promoted by this design document.
+conditional scenario. Use 2000=50% semifinal and 3000=50% final as an
+interpretable display contract only after both thresholds are empirically
+identified and probability calibration passes. Show win probability separately.
+No current rating is promoted by this design document.

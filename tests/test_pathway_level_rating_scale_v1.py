@@ -16,7 +16,7 @@ class PathwayLevelRatingScaleTests(unittest.TestCase):
         self.anchors = PathwayAnchors(
             context="WC",
             semifinal_half_skill=1.5,
-            win_half_skill=3.5,
+            final_half_skill=3.5,
             reference_definition="event-balanced frozen 2025 WC fields",
         )
 

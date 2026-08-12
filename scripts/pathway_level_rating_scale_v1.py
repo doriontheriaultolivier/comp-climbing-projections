@@ -15,25 +15,25 @@ class PathwayScaleError(ValueError):
 class PathwayAnchors:
     context: str
     semifinal_half_skill: float
-    win_half_skill: float
+    final_half_skill: float
     reference_definition: str
 
     def validate(self) -> None:
         values = np.asarray(
-            [self.semifinal_half_skill, self.win_half_skill], dtype=float
+            [self.semifinal_half_skill, self.final_half_skill], dtype=float
         )
         if not np.isfinite(values).all():
             raise PathwayScaleError("anchor skills must be finite")
-        if self.win_half_skill <= self.semifinal_half_skill:
+        if self.final_half_skill <= self.semifinal_half_skill:
             raise PathwayScaleError(
-                "50% win skill must exceed 50% semifinal skill"
+                "50% final skill must exceed 50% semifinal skill"
             )
         if not self.context.strip() or not self.reference_definition.strip():
             raise PathwayScaleError("context and reference definition are required")
 
 
 def display_rating(skill: float | np.ndarray, anchors: PathwayAnchors) -> np.ndarray:
-    """Map latent skill to 2000=50% semi and 3000=50% win.
+    """Map latent skill to 2000=50% semi and 3000=50% final.
 
     This is an interpretable affine display transform.  It does not calibrate
     probabilities and must only be applied after the underlying joint ranking
@@ -44,7 +44,7 @@ def display_rating(skill: float | np.ndarray, anchors: PathwayAnchors) -> np.nda
     values = np.asarray(skill, dtype=float)
     if not np.isfinite(values).all():
         raise PathwayScaleError("skills must be finite")
-    width = anchors.win_half_skill - anchors.semifinal_half_skill
+    width = anchors.final_half_skill - anchors.semifinal_half_skill
     return 2000.0 + 1000.0 * (
         values - anchors.semifinal_half_skill
     ) / width
@@ -57,7 +57,7 @@ def skill_from_display_rating(
     values = np.asarray(rating, dtype=float)
     if not np.isfinite(values).all():
         raise PathwayScaleError("ratings must be finite")
-    width = anchors.win_half_skill - anchors.semifinal_half_skill
+    width = anchors.final_half_skill - anchors.semifinal_half_skill
     return anchors.semifinal_half_skill + (values - 2000.0) * width / 1000.0
 
 
