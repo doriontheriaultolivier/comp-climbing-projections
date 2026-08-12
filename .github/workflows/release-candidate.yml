@@ -33,3 +33,4 @@ jobs:
           tests/test_app_smoke.py
           tests/test_style_tagging_app.py
           tests/test_joint_temperature_shadow.py
+          tests/test_target_event_scenario.py

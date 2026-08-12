@@ -7,7 +7,7 @@ does not retain the full research warehouse in memory.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import hashlib
 import hmac
 import json
@@ -79,6 +79,9 @@ AGE_PROGRESSION_METHOD = (
 AGE_PROGRESSION_STATUS = "RESEARCH_AGGREGATE_MIN_20_NOT_CAUSAL"
 OBVIOUS_FIXTURE_EVENT_PATTERN = r"(?i)\b(?:test|mock|demo|dummy|sandbox|hidden)\b"
 JOINT_TEMPERATURE_SHADOW_PATH = DATA / "boulder_joint_temperature_shadow_v1.json"
+TARGET_SCENARIO_DRAWS = 5000
+TARGET_SCENARIO_EVENT_SD = 155.0
+TARGET_SCENARIO_GUMBEL_SCALE = 400.0 / np.log(10.0)
 
 
 def transparent(color: str, alpha: float = 0.12) -> str:
@@ -173,6 +176,142 @@ def load_joint_temperature_shadow(
         return value
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
+
+
+def simulate_target_event_scenario(
+    athletes: pd.DataFrame,
+    field_selection_ids: list[str],
+    focus_selection_id: str,
+    *,
+    rating_column: str,
+    draws: int = TARGET_SCENARIO_DRAWS,
+    temperature: float = 3.0,
+    event_sd: float = TARGET_SCENARIO_EVENT_SD,
+) -> dict[str, object]:
+    """Simulate one conditional field from a single joint ranking law.
+
+    Placement and focus-versus-opponent probabilities are marginals of the
+    same draws. Missing specialist evidence is excluded, never replaced with a
+    different rating family.
+    """
+    if draws < 500 or draws > 20_000:
+        raise ValueError("scenario draws must be between 500 and 20,000")
+    if not np.isfinite(temperature) or temperature <= 0:
+        raise ValueError("temperature must be positive and finite")
+    if not np.isfinite(event_sd) or event_sd < 0:
+        raise ValueError("event_sd must be non-negative and finite")
+    if rating_column not in athletes.columns:
+        raise ValueError(f"rating column is unavailable: {rating_column}")
+    requested = list(dict.fromkeys(str(value) for value in field_selection_ids))
+    if len(requested) < 2:
+        raise ValueError("the selected field needs at least two athletes")
+    if len(requested) > 120:
+        raise ValueError("the interactive scenario supports at most 120 field entries")
+    rows = selected_rows(athletes, requested)
+    rows["_selection_id"] = athlete_selection_ids(rows)
+    requested_order = {value: index for index, value in enumerate(requested)}
+    rows = rows.loc[rows["_selection_id"].isin(requested_order)].copy()
+    rows["_selection_order"] = rows["_selection_id"].map(requested_order)
+    rows = rows.sort_values("_selection_order", kind="stable")
+    if rows["_selection_id"].duplicated().any() or len(rows) != len(requested):
+        raise ValueError("selected field identities are missing or duplicated")
+    if rows["pool"].nunique() != 1:
+        raise ValueError("all selected athletes must be in one Boulder pool")
+    rows["_scenario_rating"] = pd.to_numeric(rows[rating_column], errors="coerce")
+    rows["_scenario_uncertainty"] = pd.to_numeric(
+        rows.get("Global-ELO uncertainty"), errors="coerce"
+    )
+    eligible = (
+        np.isfinite(rows["_scenario_rating"])
+        & np.isfinite(rows["_scenario_uncertainty"])
+        & rows["_scenario_uncertainty"].ge(0)
+    )
+    excluded = rows.loc[~eligible, ["_selection_id", "athlete_name"]].copy()
+    rows = rows.loc[eligible].reset_index(drop=True)
+    if focus_selection_id not in set(rows["_selection_id"]):
+        raise ValueError("the focus athlete lacks the selected rating evidence")
+    if len(rows) < 2:
+        raise ValueError("fewer than two field athletes have the selected rating evidence")
+
+    seed_payload = {
+        "schema": "target-event-scenario-seed-v1",
+        "rating_column": rating_column,
+        "draws": draws,
+        "temperature": float(temperature),
+        "event_sd": float(event_sd),
+        "athletes": [
+            {
+                "id": str(selection_id),
+                "rating": float(rating),
+                "uncertainty": float(sd),
+            }
+            for selection_id, rating, sd in zip(
+                rows["_selection_id"],
+                rows["_scenario_rating"],
+                rows["_scenario_uncertainty"],
+            )
+        ],
+    }
+    seed_bytes = json.dumps(
+        seed_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    seed = int.from_bytes(hashlib.sha256(seed_bytes).digest()[:8], "little")
+    rng = np.random.default_rng(seed)
+    mean = rows["_scenario_rating"].to_numpy(float)
+    uncertainty = rows["_scenario_uncertainty"].to_numpy(float)
+    noise = rng.normal(
+        0.0,
+        np.sqrt(uncertainty**2 + event_sd**2),
+        size=(draws, len(rows)),
+    )
+    noise += rng.gumbel(0.0, TARGET_SCENARIO_GUMBEL_SCALE, size=noise.shape)
+    performance = temperature * (mean - mean.mean())[None, :] + noise
+    order = np.argsort(-performance, axis=1, kind="stable")
+    placement_index = np.empty_like(order)
+    placement_index[np.arange(draws)[:, None], order] = np.arange(len(rows))[None, :]
+    placement = np.zeros((len(rows), len(rows)), dtype=float)
+    for athlete_index in range(len(rows)):
+        placement[athlete_index] = (
+            np.bincount(placement_index[:, athlete_index], minlength=len(rows)) / draws
+        )
+    cumulative = np.cumsum(placement, axis=1)
+    focus_index = int(rows.index[rows["_selection_id"].eq(focus_selection_id)][0])
+    focus_beats = (performance[:, focus_index, None] > performance).mean(axis=0)
+    focus_beats[focus_index] = 0.5
+
+    summary = pd.DataFrame(
+        {
+            "selection_id": rows["_selection_id"],
+            "Athlete": rows["athlete_name"].map(friendly_name),
+            "Rating": mean,
+            "Rating uncertainty": uncertainty,
+            "P(win)": cumulative[:, 0],
+            "P(top 3)": cumulative[:, min(3, len(rows)) - 1],
+            "P(top 8)": cumulative[:, min(8, len(rows)) - 1],
+            "Expected place": (placement * np.arange(1, len(rows) + 1)).sum(axis=1),
+        }
+    )
+    opponent_mask = np.arange(len(rows)) != focus_index
+    opponents = pd.DataFrame(
+        {
+            "selection_id": rows.loc[opponent_mask, "_selection_id"].to_numpy(),
+            "Opponent": rows.loc[opponent_mask, "athlete_name"].map(friendly_name).to_numpy(),
+            "Focus beats opponent": focus_beats[opponent_mask],
+            "Opponent beats focus": 1.0 - focus_beats[opponent_mask],
+            "Opponent rating": mean[opponent_mask],
+        }
+    ).sort_values("Focus beats opponent", kind="stable")
+    return {
+        "summary": summary,
+        "opponents": opponents.reset_index(drop=True),
+        "placement_probabilities": placement,
+        "excluded": excluded.reset_index(drop=True),
+        "field_size": int(len(rows)),
+        "draws": int(draws),
+        "seed": int(seed),
+        "rating_column": rating_column,
+        "focus_selection_id": focus_selection_id,
+    }
 
 
 def quarantine_obvious_fixture_exposure(
@@ -2227,6 +2366,169 @@ def render_rating_detail(
                     )
 
 
+def render_target_event_scenario(
+    athletes: pd.DataFrame,
+    selected: list[str],
+    history: pd.DataFrame,
+) -> None:
+    """Render a selected-field research scenario from the locked joint law."""
+    shadow = load_joint_temperature_shadow()
+    focus = selected_rows(athletes, selected[:1])
+    if shadow is None or focus.empty:
+        return
+    focus_row = focus.iloc[0]
+    pool = str(focus_row["pool"])
+    evidence_through = pd.to_datetime(
+        history.get("event_date", pd.Series(dtype="datetime64[ns]")), errors="coerce"
+    ).max()
+    if pd.isna(evidence_through):
+        evidence_through = pd.Timestamp(date.today())
+    default_target_date = pd.Timestamp(evidence_through).date() + timedelta(days=30)
+
+    with st.container(border=True):
+        st.header("Target event scenario")
+        st.caption(
+            "Research shadow · conditional on the manually selected field. "
+            "Named-opponent and placement probabilities are marginals of the same "
+            "joint ranking draws."
+        )
+        top = st.columns([1.4, 0.8])
+        top[0].text_input(
+            "Target competition",
+            value="Target Boulder event",
+            key="target_scenario_event",
+        )
+        target_date = top[1].date_input(
+            "Target date",
+            value=default_target_date,
+            key="target_scenario_date",
+        )
+        rating_column = "Global-ELO"
+
+        selectors = athlete_selector_frame(
+            athletes.loc[athletes["pool"].astype(str).eq(pool)]
+        ).sort_values(
+            ["_selection_label", "_selection_id"],
+            key=lambda values: values.astype(str).str.casefold(),
+        )
+        options = selectors["_selection_id"].tolist()
+        labels = dict(zip(selectors["_selection_id"], selectors["_selection_label"]))
+        defaults = [value for value in selected if value in set(options)]
+        focus_id = athlete_selection_id(focus_row["pool"], focus_row["global_id"])
+        defaults = list(dict.fromkeys([focus_id, *defaults]))
+        field_ids = st.multiselect(
+            "Expected field",
+            options,
+            default=defaults,
+            format_func=lambda value: labels[value],
+            max_selections=120,
+            key="target_scenario_field",
+            help=(
+                "This is a conditional field scenario, not an attendance forecast. "
+                "Select the athletes you actually expect to compare."
+            ),
+        )
+        if target_date < evidence_through.date():
+            st.warning(
+                f"Target date precedes the rating evidence through {evidence_through:%Y-%m-%d}; "
+                "this current-state scenario should not be read as a historical forecast."
+            )
+        if focus_id not in field_ids:
+            st.info("Keep the main athlete in the expected field to calculate the scenario.")
+            return
+        if len(field_ids) < 2:
+            st.info("Add at least one opponent to calculate the selected-field scenario.")
+            return
+        try:
+            result = simulate_target_event_scenario(
+                athletes,
+                field_ids,
+                focus_id,
+                rating_column=rating_column,
+                temperature=float(shadow["selected_temperature"]),
+            )
+        except ValueError as error:
+            st.warning(str(error))
+            return
+        summary = result["summary"]
+        focus_summary = summary.loc[summary["selection_id"].eq(focus_id)].iloc[0]
+        field_size = int(result["field_size"])
+        focus_position = int(summary.index[summary["selection_id"].eq(focus_id)][0])
+        placement = result["placement_probabilities"]
+        metrics = st.columns(4)
+        metrics[0].metric(
+            f"{friendly_name(focus_row['athlete_name'])} · P(1st)",
+            f"{float(focus_summary['P(win)']):.1%}",
+        )
+        if field_size > 3:
+            metrics[1].metric("P(top 3)", f"{float(focus_summary['P(top 3)']):.1%}")
+        elif field_size == 3:
+            metrics[1].metric(
+                "P(top 2)", f"{float(placement[focus_position, :2].sum()):.1%}"
+            )
+        else:
+            metrics[1].metric("Named matchup", "1")
+        if field_size > 8:
+            metrics[2].metric("P(top 8)", f"{float(focus_summary['P(top 8)']):.1%}")
+        else:
+            metrics[2].metric("Field entries", str(field_size))
+        metrics[3].metric("Expected place", f"{float(focus_summary['Expected place']):.1f}")
+        st.caption(
+            f"{result['field_size']} eligible athletes · {result['draws']:,} deterministic "
+            f"joint draws · {rating_column} · rating evidence through "
+            f"{evidence_through:%Y-%m-%d}. The event name and date label this selected-field "
+            "scenario but do not yet add time evolution, round, procedure, or style effects."
+        )
+
+        opponent_display = result["opponents"].copy()
+        opponent_display["Focus beats opponent"] = opponent_display[
+            "Focus beats opponent"
+        ].map(lambda value: f"{value:.1%}")
+        opponent_display["Opponent beats focus"] = opponent_display[
+            "Opponent beats focus"
+        ].map(lambda value: f"{value:.1%}")
+        opponent_display["Opponent rating"] = opponent_display["Opponent rating"].map(
+            lambda value: f"{value:.0f}"
+        )
+        st.markdown("**Named-opponent probabilities**")
+        st.dataframe(
+            opponent_display.drop(columns="selection_id"),
+            hide_index=True,
+            width="stretch",
+        )
+        with st.expander("Selected-field placement distribution"):
+            placement_display = summary.sort_values(
+                ["P(win)", "Expected place"], ascending=[False, True], kind="stable"
+            ).drop(columns="selection_id")
+            for column in ("P(win)", "P(top 3)", "P(top 8)"):
+                placement_display[column] = placement_display[column].map(
+                    lambda value: f"{value:.1%}"
+                )
+            placement_display["Rating"] = placement_display["Rating"].map(
+                lambda value: f"{value:.0f}"
+            )
+            placement_display["Rating uncertainty"] = placement_display[
+                "Rating uncertainty"
+            ].map(lambda value: f"{value:.0f}")
+            placement_display["Expected place"] = placement_display[
+                "Expected place"
+            ].map(lambda value: f"{value:.1f}")
+            st.dataframe(placement_display, hide_index=True, width="stretch")
+        excluded = result["excluded"]
+        if len(excluded):
+            st.caption(
+                f"{len(excluded)} selected athlete(s) were withheld because {rating_column} "
+                "or its declared uncertainty was unavailable."
+            )
+        st.warning(
+            "This scenario does not predict attendance, selection, injury, exact boulder "
+            "styles, travel readiness, or who will actually enter the field. It is a "
+            "current-rating research shadow, not the separate representative-semifinal "
+            "pilot and not a production betting probability.",
+            icon="⚠️",
+        )
+
+
 def startup_status(data: dict[str, pd.DataFrame]) -> None:
     missing = [
         key for key in ("athletes", "history")
@@ -2361,6 +2663,7 @@ def main() -> None:
         st.info("Select at least one athlete to begin.")
         st.stop()
     render_rating_detail(athletes, data["history"], selected)
+    render_target_event_scenario(athletes, selected, data["history"])
     render_canadian_projection_pilot(
         athletes,
         selected,
