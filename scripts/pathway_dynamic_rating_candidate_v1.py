@@ -48,6 +48,36 @@ DIRECT_CONTEXT_DOMAINS = (
 )
 TARGET_DOMAINS = (REFERENCE_DOMAIN, *DIRECT_CONTEXT_DOMAINS)
 
+# Statistical shrinkage parents for the next challenger. These never exclude
+# results or impose a hand-written result weight; sparse children borrow more
+# from their parent and the amount must be selected chronologically.
+DOMAIN_PARENT = {
+    "fed_cec": "cont_pan_america",
+    "fed_cec_youth": "cont_pan_america_youth",
+    "fed_usac": "cont_pan_america",
+    "fed_usac_youth": "cont_pan_america_youth",
+    "interfed_north_america": "cont_pan_america",
+    "interfed_north_america_youth": "cont_pan_america_youth",
+    "fed_fasi": "cont_europe",
+    "fed_fasi_youth": "cont_europe_youth",
+    "fed_sac_cas": "cont_europe",
+    "fed_sac_cas_youth": "cont_europe_youth",
+    "fed_fedme": "cont_europe",
+    "fed_fedme_youth": "cont_europe_youth",
+    "cont_africa": REFERENCE_DOMAIN,
+    "cont_africa_youth": "ifsc_world_youth",
+    "cont_asia": REFERENCE_DOMAIN,
+    "cont_asia_youth": "ifsc_world_youth",
+    "cont_europe": REFERENCE_DOMAIN,
+    "cont_europe_youth": "ifsc_world_youth",
+    "cont_oceania": REFERENCE_DOMAIN,
+    "cont_oceania_youth": "ifsc_world_youth",
+    "cont_pan_america": REFERENCE_DOMAIN,
+    "cont_pan_america_youth": "ifsc_world_youth",
+    "ifsc_world_youth": REFERENCE_DOMAIN,
+    "wc": REFERENCE_DOMAIN,
+}
+
 
 class PathwayCandidateError(ValueError):
     pass
@@ -140,3 +170,70 @@ def pathway_ablation_configs(
         ),
         "fixed_independent_shrunk_context_offsets": pathway_candidate_config(source),
     }
+
+
+def continuous_hierarchical_parent_weight(
+    direct_event_contexts: int,
+    wc_bridge_fraction: float,
+    *,
+    event_half_saturation: float,
+    bridge_half_saturation: float,
+) -> float:
+    """Illustrate continuous parent borrowing without a binary support gate."""
+
+    if isinstance(direct_event_contexts, bool) or direct_event_contexts < 0:
+        raise PathwayCandidateError("direct event contexts must be nonnegative")
+    bridge = float(wc_bridge_fraction)
+    event_half = float(event_half_saturation)
+    bridge_half = float(bridge_half_saturation)
+    if not 0.0 <= bridge <= 1.0:
+        raise PathwayCandidateError("bridge fraction must be in [0, 1]")
+    if event_half <= 0.0 or bridge_half <= 0.0:
+        raise PathwayCandidateError("half-saturation values must be positive")
+    event_support = direct_event_contexts / (direct_event_contexts + event_half)
+    bridge_support = bridge / (bridge + bridge_half)
+    child_information = event_support * bridge_support
+    return float(1.0 - child_information)
+
+
+def pathway_hierarchy_audit(
+    support: pd.DataFrame,
+    *,
+    event_half_saturation: float = 20.0,
+    bridge_half_saturation: float = 0.10,
+) -> pd.DataFrame:
+    """Describe the hierarchy; do not fit or update any athlete rating."""
+
+    required = {
+        "pathway_target_domain", "direct_event_contexts", "wc_bridge_fraction"
+    }
+    missing = required - set(support.columns)
+    if missing:
+        raise PathwayCandidateError(
+            f"support table missing hierarchy columns: {sorted(missing)}"
+        )
+    rows: list[dict[str, object]] = []
+    for record in support.to_dict("records"):
+        child = str(record["pathway_target_domain"])
+        if child == REFERENCE_DOMAIN:
+            continue
+        parent = DOMAIN_PARENT.get(child)
+        if parent is None:
+            raise PathwayCandidateError(f"hierarchy parent missing for {child}")
+        rows.append({
+            "pathway_target_domain": child,
+            "parent_domain": parent,
+            "direct_event_contexts": int(record["direct_event_contexts"]),
+            "wc_bridge_fraction": float(record["wc_bridge_fraction"]),
+            "illustrative_parent_weight": continuous_hierarchical_parent_weight(
+                int(record["direct_event_contexts"]),
+                float(record["wc_bridge_fraction"]),
+                event_half_saturation=event_half_saturation,
+                bridge_half_saturation=bridge_half_saturation,
+            ),
+            "selected_for_model": False,
+        })
+    return pd.DataFrame(rows).sort_values(
+        ["illustrative_parent_weight", "pathway_target_domain"],
+        ascending=[False, True],
+    ).reset_index(drop=True)

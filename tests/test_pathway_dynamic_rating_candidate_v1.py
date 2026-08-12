@@ -4,11 +4,14 @@ import pandas as pd
 from scripts.dynamic_boulder_rating import DynamicBoulderRating
 from scripts.pathway_dynamic_rating_candidate_v1 import (
     DIRECT_CONTEXT_DOMAINS,
+    DOMAIN_PARENT,
     PathwayCandidateError,
     attach_pathway_model_domains,
+    continuous_hierarchical_parent_weight,
     model_domain,
     pathway_ablation_configs,
     pathway_candidate_config,
+    pathway_hierarchy_audit,
 )
 
 
@@ -73,3 +76,34 @@ def test_row_adapter_preserves_auditable_quarantine_and_shared_updates():
     assert actual.loc[1, "pathway_target_domain"] is None
     assert not bool(actual.loc[1, "pathway_input_eligible"])
     assert actual["rank"].tolist() == [1, 1]
+
+
+def test_every_direct_context_has_a_declared_hierarchical_parent():
+    assert set(DOMAIN_PARENT) == set(DIRECT_CONTEXT_DOMAINS)
+    assert DOMAIN_PARENT["interfed_north_america"] == "cont_pan_america"
+    assert DOMAIN_PARENT["fed_cec_youth"] == "cont_pan_america_youth"
+    assert DOMAIN_PARENT["cont_pan_america_youth"] == "ifsc_world_youth"
+
+
+def test_parent_borrowing_is_continuous_not_a_binary_validity_gate():
+    sparse = continuous_hierarchical_parent_weight(
+        2, 0.03, event_half_saturation=20, bridge_half_saturation=0.10
+    )
+    medium = continuous_hierarchical_parent_weight(
+        20, 0.10, event_half_saturation=20, bridge_half_saturation=0.10
+    )
+    strong = continuous_hierarchical_parent_weight(
+        100, 0.70, event_half_saturation=20, bridge_half_saturation=0.10
+    )
+    assert 0 < strong < medium < sparse < 1
+
+
+def test_hierarchy_audit_labels_weights_as_illustrative_only():
+    support = pd.DataFrame({
+        "pathway_target_domain": ["cont_africa", "interfed_north_america"],
+        "direct_event_contexts": [2, 20],
+        "wc_bridge_fraction": [0.03, 0.10],
+    })
+    actual = pathway_hierarchy_audit(support)
+    assert set(actual["parent_domain"]) == {"other", "cont_pan_america"}
+    assert not actual["selected_for_model"].any()
