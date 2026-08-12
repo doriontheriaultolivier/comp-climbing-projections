@@ -401,11 +401,11 @@ class BoulderAnchorVerificationWorkflowTests(unittest.TestCase):
             CONTRACT_NAMESPACE,
             "boulder-anchor-verification-v4-frozen77-anchors1fps",
         )
-        self.assertIn("actions/cache/restore@v5", workflow)
-        self.assertIn("actions/cache/save@v5", workflow)
+        self.assertIn("actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25", workflow)
+        self.assertIn("actions/cache/save@caa296126883cff596d87d8935842f9db880ef25", workflow)
         self.assertIn("--continue-on-window-failure", workflow)
         self.assertIn("merge-checkpoints:", workflow)
-        self.assertEqual(workflow.count("actions/download-artifact@v8"), 3)
+        self.assertEqual(workflow.count("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"), 3)
         self.assertIn("merge_boulder_anchor_verification_checkpoints.py", workflow)
         self.assertIn("contents: read", workflow)
 

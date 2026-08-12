@@ -378,9 +378,9 @@ class AnchorDiscoveryTests(unittest.TestCase):
         self.assertIn("if: inputs.execute", workflow)
         self.assertIn("boulder-anchor-discovery-v4", workflow)
         self.assertNotIn("boulder-anchor-discovery-v3-", workflow)
-        self.assertIn("actions/cache/restore@v5", workflow)
-        self.assertIn("actions/cache/save@v5", workflow)
-        self.assertIn("actions/upload-artifact@v7", workflow)
+        self.assertIn("actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25", workflow)
+        self.assertIn("actions/cache/save@caa296126883cff596d87d8935842f9db880ef25", workflow)
+        self.assertIn("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", workflow)
         self.assertIn(
             "path: artifacts/boulder-anchor-discovery-v4/event-${{ matrix.event_id }}/",
             workflow,
