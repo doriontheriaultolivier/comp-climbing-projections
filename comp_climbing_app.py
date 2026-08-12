@@ -283,11 +283,46 @@ def load_probability_spectrum_shadow(
                 return None
         cnr = value["cnr"]
         if (
-            set(cnr) != {"available_for_event_date_calibration", "interpretation"}
+            set(cnr) != {
+                "available_for_event_date_calibration",
+                "canadian_strict_prior_subset",
+                "interpretation",
+            }
             or cnr["available_for_event_date_calibration"] is not False
             or not isinstance(cnr["interpretation"], str)
         ):
             return None
+        cnr_subset = cnr["canadian_strict_prior_subset"]
+        if (
+            set(cnr_subset) != {
+                "status", "athlete_starts", "athletes", "rankable_pairs",
+                "physical_events", "fixed_adjustment_supported",
+                "moderate_offset_diagnostics",
+            }
+            or cnr_subset["status"]
+            != "retrospective_continuous_support_mixed_by_year"
+            or cnr_subset["fixed_adjustment_supported"] is not False
+            or [row.get("year") for row in cnr_subset["moderate_offset_diagnostics"]]
+            != [2024, 2025, 2026]
+            or int(cnr_subset["athlete_starts"]) != 85
+            or int(cnr_subset["athletes"]) != 12
+            or int(cnr_subset["rankable_pairs"]) != 73
+            or int(cnr_subset["physical_events"]) != 17
+        ):
+            return None
+        for row in cnr_subset["moderate_offset_diagnostics"]:
+            if set(row) != {
+                "year", "cnr_logit_offset", "pairs", "physical_events",
+                "log_loss_delta", "log_loss_delta_ci95",
+            }:
+                return None
+            numeric = [
+                row["year"], row["cnr_logit_offset"], row["pairs"],
+                row["physical_events"], row["log_loss_delta"],
+                *row["log_loss_delta_ci95"],
+            ]
+            if any(isinstance(item, bool) or not np.isfinite(float(item)) for item in numeric):
+                return None
         temperatures = value["prospective_temperature"]
         if not isinstance(temperatures, list) or [row.get("test_year") for row in temperatures] != [
             2025,
@@ -312,6 +347,8 @@ def load_probability_spectrum_shadow(
         bindings = value["source_bindings"]
         if set(bindings) != {
             "calibration_spectrum_sha256",
+            "cnr_continuous_support_report_sha256",
+            "cnr_continuous_support_sensitivity_sha256",
             "named_pair_artifact_sha256",
             "prospective_pair_output_sha256",
         }:
@@ -2088,6 +2125,29 @@ def render_probability_spectrum_shadow() -> None:
         )
         st.markdown("**Age-band residual diagnostics**")
         st.dataframe(age_rows, hide_index=True, width="stretch")
+        cnr_subset = spectrum["cnr"]["canadian_strict_prior_subset"]
+        cnr_rows = pd.DataFrame(cnr_subset["moderate_offset_diagnostics"]).rename(
+            columns={
+                "year": "Year",
+                "pairs": "Pairs",
+                "physical_events": "Competitions",
+                "log_loss_delta": "Log-loss change",
+            }
+        )
+        cnr_rows["Log-loss change"] = cnr_rows["Log-loss change"].map(
+            lambda value: f"{value:+.5f}"
+        )
+        cnr_rows["95% whole-event interval"] = cnr_rows[
+            "log_loss_delta_ci95"
+        ].map(lambda values: f"[{values[0]:+.5f}, {values[1]:+.5f}]")
+        st.markdown("**Strict-prior Canadian CNR residual · moderate sensitivity**")
+        st.dataframe(
+            cnr_rows[
+                ["Year", "Competitions", "Pairs", "Log-loss change", "95% whole-event interval"]
+            ],
+            hide_index=True,
+            width="stretch",
+        )
         st.caption(
             "Age residuals mix ability, source, pathway, survivor selection and "
             "competition tier; they are not causal age effects and age is not added "

@@ -23,6 +23,14 @@ def test_locked_probability_spectrum_loads_and_exposes_known_limits() -> None:
     assert value["evaluation"]["competition_fields"] == 3749
     assert value["evaluation"]["canonical_pairs"] == 1164644
     assert value["cnr"]["available_for_event_date_calibration"] is False
+    cnr_subset = value["cnr"]["canadian_strict_prior_subset"]
+    assert cnr_subset["rankable_pairs"] == 73
+    assert cnr_subset["physical_events"] == 17
+    assert cnr_subset["fixed_adjustment_supported"] is False
+    assert [
+        row["log_loss_delta"] < 0
+        for row in cnr_subset["moderate_offset_diagnostics"]
+    ] == [False, True, False]
     high_low = next(
         row
         for row in value["rating_diagnostics"]
@@ -56,4 +64,5 @@ def test_probability_spectrum_render_is_clear_and_research_only() -> None:
     assert "too compressed toward 50%" in text
     assert "aggregate model checks, not athlete labels" in text
     assert "CNR" in text
-    assert len(app.dataframe) == 3
+    assert "CNR residual direction reverses" in text
+    assert len(app.dataframe) == 4
