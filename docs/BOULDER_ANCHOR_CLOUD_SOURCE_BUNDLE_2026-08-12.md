@@ -27,6 +27,7 @@ It must not use the broad historical video commit as a proxy for this bundle.
 | `scripts/merge_boulder_anchor_verification_checkpoints.py` | 990 | `0adfb935356ed834022f4e88b5d7b6785c119619d4f2e5933d1e5ed4bcb467dc` |
 | `tests/test_video_boulder_anchor_discovery.py` | 18,699 | `d573e0ec4464d3c01ea2d58f52c1ed24cc87ef899c4751e080402f0086cb7080` |
 | `tests/test_boulder_anchor_verification_workflow.py` | 19,715 | `3593e0bee6d1e8582d5f2142ed5c846da51b814cfc7ced7232fbce8454c5a412` |
+| `.github/workflows/video-2026-boulder-anchor-discovery.yml` | 4,590 | `c80a37e7a33a5d6a3ad4645652427001bc4e98410de739bdff886410779e5528` |
 | `.github/workflows/video-2026-boulder-anchor-verification.yml` | 8,380 | `eec856805bed61fa274feb02b32e9c9206b3ce0b132ae8a482d2d61737b1b5c8` |
 
 The bundle also needs the seven frozen files in

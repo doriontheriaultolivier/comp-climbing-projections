@@ -1,0 +1,59 @@
+{
+  "athlete_comparison_allowed": false,
+  "athlete_scoring_allowed": false,
+  "common_contract": {
+    "fps": 0.25,
+    "max_transient_retries": 2,
+    "max_validation_retries": 1,
+    "model": "gemini-3.1-flash-lite",
+    "pass_name": "discovery",
+    "pipeline_version": "ifsc-boulder-anchor-discovery-v1",
+    "request_timeout_ms": 900000,
+    "structured_output_profile": "gemini-flash-lite-accepted-schema-v2",
+    "verification_seconds": 60,
+    "window_seconds": 1500
+  },
+  "completed_window_count": 77,
+  "coverage_by_event": [
+    {
+      "completed": 25,
+      "event_id": 1479,
+      "missing": 0,
+      "planned": 25,
+      "quarantined": 0
+    },
+    {
+      "completed": 26,
+      "event_id": 1480,
+      "missing": 0,
+      "planned": 26,
+      "quarantined": 0
+    },
+    {
+      "completed": 26,
+      "event_id": 1482,
+      "missing": 0,
+      "planned": 26,
+      "quarantined": 0
+    }
+  ],
+  "elo_update_allowed": false,
+  "media_download_required": false,
+  "merge_version": "ifsc-boulder-anchor-merge-v1",
+  "missing_window_count": 0,
+  "pipeline_version": "ifsc-boulder-anchor-discovery-v1",
+  "planned_window_count": 77,
+  "production_use_allowed": false,
+  "quarantined_window_count": 0,
+  "source_count": 3,
+  "source_event_ids": [
+    1479,
+    1480,
+    1482
+  ],
+  "verification_candidate_window_count": 385,
+  "verification_executes_model": false,
+  "verification_max_windows": 100,
+  "verification_plan_truncated": true,
+  "verification_selected_window_count": 100
+}
