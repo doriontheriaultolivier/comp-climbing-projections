@@ -85,7 +85,14 @@ def main() -> int:
         if not output.is_file() or output.stat().st_size == 0:
             raise SystemExit(f"ffmpeg did not create a non-empty frame {candidate_id}")
         receipt_rows.append({
-            "candidate_id": candidate_id, "video_id": video_id,
+            "candidate_id": candidate_id,
+            "event_id": record["event_id"],
+            "category_round_id": record["category_round_id"],
+            "event": record["event"], "gender": record["gender"],
+            "round": record["round"], "boulder_slot": record["boulder_slot"],
+            "source_window_id": record["source_window_id"],
+            "source_candidate_id": record["source_candidate_id"],
+            "video_id": video_id,
             "source_media_sha256": _sha256(media), "frame_seconds": record["frame_seconds"],
             "frame_filename": output.name, "frame_sha256": _sha256(output), "frame_bytes": output.stat().st_size,
             "candidate_status": "REQUIRES_VISUAL_EMPTY_WALL_REVIEW", "empty_wall_verified": False,
