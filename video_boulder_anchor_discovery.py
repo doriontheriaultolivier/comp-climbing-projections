@@ -115,7 +115,10 @@ def _slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-")
 
 
-def _target_manifest(manifest: pd.DataFrame, event_id: int | None = None) -> pd.DataFrame:
+def _target_manifest(manifest: pd.DataFrame, event_id: int | None = None, *, target_events: set[int] | None = None) -> pd.DataFrame:
+    target_events = TARGET_EVENTS if target_events is None else set(target_events)
+    if not target_events:
+        raise ValueError("anchor discovery requires target events")
     required = {
         "event_id", "category_round_id", "event", "discipline", "gender",
         "round", "video_id", "official_youtube_url", "duration_seconds",
@@ -125,17 +128,17 @@ def _target_manifest(manifest: pd.DataFrame, event_id: int | None = None) -> pd.
     if missing:
         raise ValueError("video manifest is missing: " + ", ".join(sorted(missing)))
     selected = manifest.loc[
-        pd.to_numeric(manifest["event_id"], errors="coerce").isin(TARGET_EVENTS)
+        pd.to_numeric(manifest["event_id"], errors="coerce").isin(target_events)
         & manifest["discipline"].astype(str).eq("Boulder")
         & manifest["round"].astype(str).isin(TARGET_ROUNDS)
     ].copy()
     if event_id is not None:
-        if event_id not in TARGET_EVENTS:
-            raise ValueError("event_id must be one of the three priority events")
+        if event_id not in target_events:
+            raise ValueError("event_id must be in the declared target events")
         selected = selected.loc[
             pd.to_numeric(selected["event_id"], errors="coerce").eq(event_id)
         ].copy()
-    expected_sources = 4 if event_id is not None else 12
+    expected_sources = 4 if event_id is not None else 4 * len(target_events)
     if len(selected) != expected_sources:
         raise ValueError(
             f"anchor discovery requires exactly {expected_sources} priority Boulder broadcasts"
@@ -155,6 +158,7 @@ def build_discovery_plan(
     window_seconds: int = DISCOVERY_SECONDS,
     fps: float = DISCOVERY_FPS,
     event_id: int | None = None,
+    target_events: set[int] | None = None,
 ) -> list[AnchorWindow]:
     """Plan 20–30 minute, non-overlapping, low-FPS discovery windows."""
 
@@ -162,7 +166,7 @@ def build_discovery_plan(
         raise ValueError("discovery windows must be 20 to 30 minutes")
     if not 0 < fps <= 0.5:
         raise ValueError("discovery FPS must be above 0 and no greater than 0.5")
-    selected = _target_manifest(manifest, event_id=event_id)
+    selected = _target_manifest(manifest, event_id=event_id, target_events=target_events)
     rows: list[AnchorWindow] = []
     ordered = selected.sort_values(
         ["event_id", "gender", "round", "category_round_id"], kind="stable"

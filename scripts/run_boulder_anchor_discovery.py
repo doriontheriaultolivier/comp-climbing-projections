@@ -415,7 +415,8 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--pass", dest="pass_name", choices=("discovery", "verification"), required=True)
     parser.add_argument("--manifest", type=Path, default=ROOT / "data/video_2026_source_manifest.csv")
     parser.add_argument("--required-source-manifest-sha256", default="")
-    parser.add_argument("--event-id", type=int, choices=(1479, 1480, 1482))
+    parser.add_argument("--event-id", type=int)
+    parser.add_argument("--target-event-ids", default="1479,1480,1482")
     parser.add_argument("--discovery-checkpoint", type=Path)
     parser.add_argument("--required-discovery-checkpoint-sha256", default="")
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -455,6 +456,14 @@ def _require_bounded_execution(
 
 def main() -> int:
     args = _arguments()
+    try:
+        target_events = {int(item) for item in args.target_event_ids.split(",") if item.strip()}
+    except ValueError:
+        raise SystemExit("target-event-ids must be comma-separated positive integers")
+    if not target_events or any(value <= 0 for value in target_events):
+        raise SystemExit("target-event-ids must be comma-separated positive integers")
+    if args.event_id is not None and args.event_id not in target_events:
+        raise SystemExit("event-id must be in target-event-ids")
     _require_bounded_execution(
         args.pass_name, execute=args.execute, max_windows=args.max_windows
     )
@@ -483,7 +492,8 @@ def main() -> int:
     if args.pass_name == "discovery":
         fps = args.fps if args.fps is not None else DISCOVERY_FPS
         windows = build_discovery_plan(
-            manifest, window_seconds=args.window_seconds, fps=fps, event_id=args.event_id
+            manifest, window_seconds=args.window_seconds, fps=fps, event_id=args.event_id,
+            target_events=target_events,
         )
     else:
         if args.discovery_checkpoint is None or not args.discovery_checkpoint.is_file():
