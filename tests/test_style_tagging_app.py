@@ -60,6 +60,13 @@ class StyleTaggingAppTest(unittest.TestCase):
         self.assertEqual(record["pre_zone_crimp_edge_0_3"], 3)
         self.assertEqual(record["post_zone_crimp_edge_0_3"], 2)
 
+    def test_frame_receipt_matches_exact_round_and_boulder_only(self) -> None:
+        receipt = {"frames": [
+            {"candidate_id": "BWF-0123456789abcdef", "category_round_id": 456, "boulder_slot": "M2", "candidate_status": "REQUIRES_VISUAL_EMPTY_WALL_REVIEW", "empty_wall_verified": False, "frame_seconds": 12.5},
+            {"candidate_id": "BWF-fedcba9876543210", "category_round_id": 999, "boulder_slot": "M2", "candidate_status": "REQUIRES_VISUAL_EMPTY_WALL_REVIEW", "empty_wall_verified": False, "frame_seconds": 13.5},
+        ]}
+        self.assertEqual([row["candidate_id"] for row in module.matching_frame_receipts(receipt, PROBLEM)], ["BWF-0123456789abcdef"])
+
     def test_shared_record_endpoint_preserves_existing_query_parameters(self) -> None:
         self.assertEqual(module.shared_records_url("https://example.test/exec", 25), "https://example.test/exec?action=list&limit=25")
         self.assertEqual(module.shared_records_url("https://example.test/exec?token=public", 25), "https://example.test/exec?token=public&action=list&limit=25")
