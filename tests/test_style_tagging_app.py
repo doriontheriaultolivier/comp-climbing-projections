@@ -46,6 +46,12 @@ class StyleTaggingAppTest(unittest.TestCase):
                 for caption in coverage_captions
             )
         )
+        self.assertTrue(
+            any(
+                "exact both-board Top-given-Zone comparisons" in caption
+                for caption in coverage_captions
+            )
+        )
         self.assertIn("Save style-tag proposal", [button.label for button in app.button])
 
     def test_standalone_tagger_owns_its_data_path(self) -> None:
@@ -100,11 +106,17 @@ class StyleTaggingAppTest(unittest.TestCase):
                 "source_scope": "CEC", "source_event_id": 224,
                 "source_round_id": 4420, "boulder_number": 3,
                 "priority_rank": 2, "linked_athletes": 7, "linked_outcomes": 7,
+                "board_linked_outcomes": 5,
+                "top_given_zone_discordant_pairs": 4,
+                "zone_discordant_pairs": 2,
             },
             {
                 "source_scope": "CEC", "source_event_id": 224,
                 "source_round_id": 4418, "boulder_number": 3,
                 "priority_rank": 5, "linked_athletes": 5, "linked_outcomes": 5,
+                "board_linked_outcomes": 3,
+                "top_given_zone_discordant_pairs": 2,
+                "zone_discordant_pairs": 1,
             },
         ])
         result = module.apply_tagging_priority(inventory, priority)
@@ -112,6 +124,9 @@ class StyleTaggingAppTest(unittest.TestCase):
         self.assertEqual(result.iloc[0]["priority_source_items"], 2)
         self.assertEqual(result.iloc[0]["priority_linked_athletes"], 7)
         self.assertEqual(result.iloc[0]["priority_linked_outcomes"], 12)
+        self.assertEqual(result.iloc[0]["priority_board_linked_outcomes"], 8)
+        self.assertEqual(result.iloc[0]["priority_top_given_zone_pairs"], 6)
+        self.assertEqual(result.iloc[0]["priority_zone_pairs"], 3)
         self.assertEqual(result.iloc[1]["priority_status"], "General governed inventory")
         self.assertEqual(len(result), 2)
 

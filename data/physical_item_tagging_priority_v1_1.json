@@ -1,0 +1,18 @@
+{
+  "all_source_items_retained": true,
+  "coaching_prescription_authority": false,
+  "hard_inclusion_cutoff": false,
+  "input_candidates_sha256": "8065211a848d38d44716f6378a4adaf9795019d48c161cffd6b03ce2cd1d5423",
+  "model_training_authority": false,
+  "output": {
+    "bytes": 233111,
+    "contains_athlete_identifiers": false,
+    "path": "physical_item_tagging_priority_v1_1.csv",
+    "rows": 535,
+    "sha256": "08709c62df2279be5934f9e2953afa39692c36fb865cd57bf761899893bc13d7"
+  },
+  "producer_sha256": "c0af919c6451f91ea7b03c38979dcf15c346ee8cc16193b31277784bd05e8ee3",
+  "schema": "physical-item-tagging-priority-v1.1",
+  "status": "HUMAN_REVIEW_EFFICIENCY_ORDER_NO_CUTOFF",
+  "top_given_zone_priority": true
+}
