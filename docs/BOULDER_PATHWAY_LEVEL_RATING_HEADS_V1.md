@@ -20,6 +20,7 @@ athletes who compete at multiple levels.
 | `NACS` | North American Cup Series | direct NACS plus learned FED→NACS and NACS→WC transfer | continental readiness and field selection |
 | `IFSC-REG:<region>` | IFSC regional/continental series | region-specific head, partially pooled across regions | regional pathway readiness |
 | `WC` | World Cups and World Championships | direct WC/WCH likelihood with lower-level transfer estimated, never assumed | elite comparison and target-event forecasting |
+| `IFSC-World-Youth` | Youth World Championships | separate transition context, partially pooled through shared skill and estimated WC transfer | youth ordering and adult-WC transition without treating youth results as adult WC results |
 | `OLYM-scenario` | fixed Olympic field/format scenario | derived primarily from WC state and exact Olympic format | conditional Olympic placement/readiness, not a standalone Elo |
 
 `OLYM` should remain a scenario rather than a fitted independent rating until

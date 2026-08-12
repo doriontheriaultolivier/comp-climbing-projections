@@ -76,8 +76,19 @@ def classify_direct_context(row: pd.Series) -> tuple[str, str]:
         "olympic games" in lower or "olympic qualifier series" in lower
     ):
         return "OLYM_SCENARIO_INPUT", "Olympic/OQS evidence informs an exact scenario, not a fitted head"
-    if source == "IFSC" and tier in {"World series", "World major", "World major youth"}:
-        return "WC" + youth_suffix, "direct World series/World championship evidence"
+    youth_world_name = bool(
+        re.search(
+            r"\byouth\s+world\s*champ|\bworld\s+climbing\s+youth\s+champ",
+            lower,
+        )
+    )
+    if source == "IFSC" and (tier == "World major youth" or youth_world_name):
+        return (
+            "IFSC_WORLD_YOUTH",
+            "direct Youth World evidence; transition context, not adult WC evidence",
+        )
+    if source == "IFSC" and tier in {"World series", "World major"}:
+        return "WC", "direct adult World series/World championship evidence"
     if source == "IFSC" and tier in IFSC_REGIONAL_TIERS:
         family = regional_family(name)
         if family is None:
@@ -91,10 +102,10 @@ def classify_direct_context(row: pd.Series) -> tuple[str, str]:
 
 
 def build_event_taxonomy(rows: pd.DataFrame) -> pd.DataFrame:
-    required = {
+    required = (
         "event_date", "event_name", "source_scope", "event_tier", "rating_context"
-    }
-    missing = required - set(rows.columns)
+    )
+    missing = set(required) - set(rows.columns)
     if missing:
         raise TaxonomyError(f"history missing columns: {sorted(missing)}")
     events = rows[list(required)].drop_duplicates().copy()

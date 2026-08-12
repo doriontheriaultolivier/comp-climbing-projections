@@ -26,6 +26,26 @@ class PathwayContextTaxonomyTests(unittest.TestCase):
         self.assertTrue(nacs.all_results_update_shared_skill)
         self.assertFalse(nacs.direct_label_controls_input_eligibility)
 
+    def test_youth_world_is_not_direct_adult_wc_evidence(self):
+        row = self.classify(
+            "IFSC",
+            "World major youth",
+            "IFSC Youth World Championships Helsinki 2025",
+            "Youth",
+        )
+        self.assertEqual(row.direct_context_head, "IFSC_WORLD_YOUTH")
+
+        inconsistent_tier = self.classify(
+            "IFSC",
+            "International other youth",
+            "World Climbing Youth Championship Arco 2026",
+            "Youth",
+        )
+        self.assertEqual(
+            inconsistent_tier.direct_context_head,
+            "IFSC_WORLD_YOUTH",
+        )
+
     def test_ifsc_region_is_explicit_and_youth_separate(self):
         row = self.classify(
             "IFSC", "Continental series youth", "IFSC European Youth Cup Graz", "Youth"
