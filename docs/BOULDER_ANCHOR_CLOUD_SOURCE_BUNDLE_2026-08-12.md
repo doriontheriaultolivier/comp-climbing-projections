@@ -49,3 +49,13 @@ and `data/video_2026_source_manifest.csv` hash
 Only after those checks may the workflow be pushed and manually dispatched.
 The dispatch remains bounded research acquisition, not model promotion or a
 public deployment.
+
+## Local release-candidate evidence
+
+On 2026-08-12 this exact bundle passed the packet validator (`77/77` planned
+windows, zero missing/quarantined, all downstream safety gates closed), 31
+focused anchor-workflow tests, and the complete clean candidate suite (`56`
+tests plus `22` subtests).  The mandatory local dry run for event `1479`
+planned 73 verification windows across its four official broadcasts and made
+no model request.  It produced a plan only; a plan is intentionally not
+validated as an executed checkpoint.
