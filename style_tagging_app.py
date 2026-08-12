@@ -142,15 +142,63 @@ def problem_inventory() -> pd.DataFrame:
     frame = pd.read_csv(path, low_memory=False)
     frame["event_name"] = frame["event_name"].fillna("").astype(str).str.strip()
     frame["event_date"] = pd.to_datetime(frame["event_date"], errors="coerce")
-    return frame.loc[frame["event_name"].ne("")].sort_values(
-        ["event_date", "event_name", "round_group", "gender", "boulder_number"],
-        ascending=[False, True, True, True, True], kind="stable",
+    priority_path = DATA / "physical_item_tagging_priority_v1.csv"
+    priority = pd.read_csv(priority_path, low_memory=False) if priority_path.exists() else pd.DataFrame()
+    return apply_tagging_priority(frame.loc[frame["event_name"].ne("")], priority)
+
+
+def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> pd.DataFrame:
+    """Attach identity-free item priorities through exact round/problem keys."""
+
+    rows = inventory.copy().reset_index(drop=True)
+    rows["_inventory_index"] = rows.index
+    rows["priority_rank"] = pd.NA
+    rows["priority_linked_athletes"] = pd.NA
+    rows["priority_linked_outcomes"] = pd.NA
+    required = {
+        "source_scope", "source_event_id", "source_round_id", "boulder_number",
+        "priority_rank", "linked_athletes", "linked_outcomes",
+    }
+    if not priority.empty and required.issubset(priority.columns):
+        expanded = rows[
+            ["_inventory_index", "source_scope", "source_event_id", "source_round_ids", "boulder_number"]
+        ].copy()
+        expanded["source_round_id"] = expanded["source_round_ids"].astype(str).str.split("|")
+        expanded = expanded.explode("source_round_id")
+        keys = ["source_scope", "source_event_id", "source_round_id", "boulder_number"]
+        for column in keys:
+            expanded[column] = expanded[column].astype(str).str.strip()
+        queue = priority[list(required)].copy()
+        for column in keys:
+            queue[column] = queue[column].astype(str).str.strip()
+        matched = expanded.merge(queue, on=keys, how="inner")
+        if not matched.empty:
+            attached = matched.groupby("_inventory_index", as_index=False).agg(
+                priority_rank=("priority_rank", "min"),
+                priority_linked_athletes=("linked_athletes", "max"),
+                priority_linked_outcomes=("linked_outcomes", "sum"),
+            )
+            rows = rows.drop(
+                columns=["priority_rank", "priority_linked_athletes", "priority_linked_outcomes"]
+            ).merge(attached, on="_inventory_index", how="left")
+    rows["priority_status"] = rows["priority_rank"].notna().map(
+        {True: "Physical-transfer priority", False: "General governed inventory"}
     )
+    return rows.sort_values(
+        ["priority_rank", "event_date", "event_name", "round_group", "gender", "boulder_number"],
+        ascending=[True, False, True, True, True, True], na_position="last", kind="stable",
+    ).drop(columns="_inventory_index").reset_index(drop=True)
 
 
 def problem_display(row: pd.Series) -> str:
     prefix = {"Men": "M", "Women": "W"}.get(str(row.gender), "B")
-    return f"{prefix}{int(row.boulder_number)} · governed {row.boulder_uid}"
+    route = f"{prefix}{int(row.boulder_number)} · governed {row.boulder_uid}"
+    if pd.notna(row.get("priority_rank")):
+        return (
+            f"Priority {int(row.priority_rank)} · {route} · "
+            f"{int(row.priority_linked_athletes)} linked athletes"
+        )
+    return route
 
 
 def backend_url() -> str:
@@ -199,6 +247,11 @@ def main() -> None:
     if inventory.empty:
         st.error("The governed boulder inventory is unavailable; tagging is disabled until it is restored.")
         return
+    prioritized = inventory.loc[inventory["priority_rank"].notna()]
+    st.caption(
+        f"{len(prioritized):,} governed Boulder slots overlap the physical/Kilter "
+        "transfer queue. Priority is continuous, not an inclusion cutoff."
+    )
     events = inventory[["event_name", "event_date"]].drop_duplicates()
     event_labels = [f"{row.event_date.date().isoformat() if pd.notna(row.event_date) else 'Date unknown'} — {row.event_name}" for row in events.itertuples(index=False)]
     with st.form("style_tag_form", clear_on_submit=True):
@@ -213,6 +266,12 @@ def main() -> None:
         chosen_display = st.selectbox("Boulder", choices)
         selected_problem = terrain_rows.loc[terrain_rows.apply(problem_display, axis=1).eq(chosen_display)].iloc[0].to_dict()
         st.caption(f"{selected_problem['boulder_count_status']} count: {int(selected_problem['boulder_count'])}; terrain: {selected_problem['terrain_group']}")
+        if pd.notna(selected_problem.get("priority_rank")):
+            st.info(
+                f"Physical-transfer priority {int(selected_problem['priority_rank'])}: "
+                f"this tag can be reused across {int(selected_problem['priority_linked_athletes'])} "
+                "linked athletes. This is a review-efficiency heuristic, not model evidence."
+            )
         confidence = st.select_slider("Confidence", options=("Low", "Moderate", "High"), value="Moderate")
         directions = st.columns(2)
         pre_direction = directions[0].selectbox("Start to Zone direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))
