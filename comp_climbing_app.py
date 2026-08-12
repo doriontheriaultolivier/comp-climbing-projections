@@ -78,6 +78,7 @@ AGE_PROGRESSION_METHOD = (
 )
 AGE_PROGRESSION_STATUS = "RESEARCH_AGGREGATE_MIN_20_NOT_CAUSAL"
 OBVIOUS_FIXTURE_EVENT_PATTERN = r"(?i)\b(?:test|mock|demo|dummy|sandbox|hidden)\b"
+JOINT_TEMPERATURE_SHADOW_PATH = DATA / "boulder_joint_temperature_shadow_v1.json"
 
 
 def transparent(color: str, alpha: float = 0.12) -> str:
@@ -102,6 +103,76 @@ def plain_key(value: object) -> str:
 def friendly_name(value: object) -> str:
     text = str(value or "").strip()
     return DISPLAY_OVERRIDES.get(plain_key(text), text)
+
+
+def load_joint_temperature_shadow(
+    path: Path = JOINT_TEMPERATURE_SHADOW_PATH,
+) -> dict[str, object] | None:
+    """Load the compact locked shadow result without importing research code."""
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if set(value) != {
+            "schema",
+            "status",
+            "model_family",
+            "fit_year",
+            "locked_test_years",
+            "selected_temperature",
+            "joint_distribution_contract",
+            "results",
+            "limits",
+            "source_bindings",
+        }:
+            return None
+        if (
+            value["schema"] != "boulder-joint-temperature-shadow-v1"
+            or value["status"] != "LOCKED_RESEARCH_SHADOW_NOT_CURRENT_PRODUCTION"
+            or value["model_family"] != "v4_global"
+            or value["fit_year"] != 2024
+            or value["locked_test_years"] != [2025, 2026]
+            or float(value["selected_temperature"]) != 3.0
+            or value["joint_distribution_contract"]
+            != "one_complete_normal_plus_gumbel_ranking_law"
+        ):
+            return None
+        results = value["results"]
+        if not isinstance(results, list) or [row.get("year") for row in results] != [2025, 2026]:
+            return None
+        for row in results:
+            if set(row) != {
+                "year",
+                "competitions",
+                "raw_pair_log_loss",
+                "shadow_pair_log_loss",
+                "pair_delta_ci95",
+                "raw_placement_rps",
+                "shadow_placement_rps",
+                "placement_delta_ci95",
+            }:
+                return None
+            numeric = [
+                row["competitions"],
+                row["raw_pair_log_loss"],
+                row["shadow_pair_log_loss"],
+                row["raw_placement_rps"],
+                row["shadow_placement_rps"],
+                *row["pair_delta_ci95"],
+                *row["placement_delta_ci95"],
+            ]
+            if any(isinstance(item, bool) or not np.isfinite(float(item)) for item in numeric):
+                return None
+            if not (
+                row["shadow_pair_log_loss"] < row["raw_pair_log_loss"]
+                and row["shadow_placement_rps"] < row["raw_placement_rps"]
+                and max(row["pair_delta_ci95"]) < 0
+                and max(row["placement_delta_ci95"]) < 0
+            ):
+                return None
+        return value
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def quarantine_obvious_fixture_exposure(
@@ -1581,6 +1652,54 @@ def render_canadian_projection_pilot(
         )
 
 
+def render_joint_temperature_shadow() -> None:
+    """Show the locked coherent calibration result without implying promotion."""
+    shadow = load_joint_temperature_shadow()
+    if shadow is None:
+        return
+    st.subheader("Shadow probability calibration")
+    st.caption(
+        "A 2024-fitted probability-sharpening layer improved named-matchup and "
+        "placement scores in locked 2025 and 2026 competitions while preserving "
+        "one joint ranking distribution. It is not yet applied to the current "
+        "athlete cards below."
+    )
+    columns = st.columns(2)
+    for column, row in zip(columns, shadow["results"]):
+        with column:
+            pair_gain = row["raw_pair_log_loss"] - row["shadow_pair_log_loss"]
+            placement_gain = row["raw_placement_rps"] - row["shadow_placement_rps"]
+            st.markdown(f"**Locked {row['year']}**")
+            metric_columns = st.columns(2)
+            metric_columns[0].metric(
+                "Pair log loss",
+                f"{row['shadow_pair_log_loss']:.4f}",
+                f"{-pair_gain:.4f}",
+                delta_color="inverse",
+            )
+            metric_columns[1].metric(
+                "Placement RPS",
+                f"{row['shadow_placement_rps']:.4f}",
+                f"{-placement_gain:.4f}",
+                delta_color="inverse",
+            )
+            st.caption(
+                f"Raw: {row['raw_pair_log_loss']:.4f} pair · "
+                f"{row['raw_placement_rps']:.4f} placement. Lower is better; "
+                "95% intervals resample whole competitions."
+            )
+    with st.expander("What this shadow result does and does not mean"):
+        st.markdown(
+            "- `T=3.0` was selected on 2024 only and left unchanged in 2025–26.\n"
+            "- Named-opponent and Top-k values remain marginals of the same "
+            "simulated event distribution.\n"
+            "- This result applies to the frozen V4 family, not automatically to "
+            "the current Canadian pilot or every event format.\n"
+            "- Age, source, CNR-availability and era/format diagnostics remain "
+            "required before a current-model replacement."
+        )
+
+
 def render_ifsc_pool(
     athletes: pd.DataFrame,
     history: pd.DataFrame,
@@ -2248,6 +2367,7 @@ def main() -> None:
         data["current_wc_projection"],
         data.get("current_wc_projection_metadata"),
     )
+    render_joint_temperature_shadow()
 
     st.header("Overview")
     section = st.segmented_control(
