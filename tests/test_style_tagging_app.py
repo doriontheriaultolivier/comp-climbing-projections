@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 import unittest
 
+import pandas as pd
+
 from streamlit.testing.v1 import AppTest
 
 PATH = Path(__file__).parents[1] / "style_tagging_app.py"
@@ -70,6 +72,32 @@ class StyleTaggingAppTest(unittest.TestCase):
     def test_shared_record_endpoint_preserves_existing_query_parameters(self) -> None:
         self.assertEqual(module.shared_records_url("https://example.test/exec", 25), "https://example.test/exec?action=list&limit=25")
         self.assertEqual(module.shared_records_url("https://example.test/exec?token=public", 25), "https://example.test/exec?token=public&action=list&limit=25")
+
+    def test_exact_round_priority_is_attached_without_excluding_other_items(self) -> None:
+        inventory = pd.DataFrame([
+            {
+                "source_scope": "CEC", "source_event_id": 224,
+                "source_round_ids": "4418|4420", "boulder_number": 3,
+                "event_date": "2026-05-14", "event_name": "Youth Nationals",
+                "round_group": "Qualification", "gender": "Men",
+            },
+            {
+                "source_scope": "CEC", "source_event_id": 224,
+                "source_round_ids": "4418|4420", "boulder_number": 4,
+                "event_date": "2026-05-14", "event_name": "Youth Nationals",
+                "round_group": "Qualification", "gender": "Men",
+            },
+        ])
+        priority = pd.DataFrame([{
+            "source_scope": "CEC", "source_event_id": 224,
+            "source_round_id": 4420, "boulder_number": 3,
+            "priority_rank": 2, "linked_athletes": 7, "linked_outcomes": 7,
+        }])
+        result = module.apply_tagging_priority(inventory, priority)
+        self.assertEqual(result.iloc[0]["priority_rank"], 2)
+        self.assertEqual(result.iloc[0]["priority_linked_athletes"], 7)
+        self.assertEqual(result.iloc[1]["priority_status"], "General governed inventory")
+        self.assertEqual(len(result), 2)
 
 
 if __name__ == "__main__":
