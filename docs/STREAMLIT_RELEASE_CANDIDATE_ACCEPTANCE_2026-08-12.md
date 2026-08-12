@@ -15,6 +15,7 @@ divergent and actively dirty.
 | Full consolidated release-candidate test suite | 25 passed, 13 subtests passed |
 | `py_compile` (`streamlit_app.py`, `comp_climbing_app.py`, `style_tagging_app.py`) | Passed |
 | Local Streamlit `/_stcore/health` | HTTP 200, `ok` |
+| Standalone style-tagger runtime render | Passed: page heading and terrain-tagging introduction visible; no browser console errors |
 | Olympics default view | Deterministic across two fresh AppTest sessions; all four athlete-set caption modes verified semantically |
 
 The test update in this candidate removes a fragile, serialized-protobuf hash
