@@ -20,6 +20,7 @@ from comp_climbing_app import (
     pool_scatter,
     progression_projection,
     quarantine_obvious_fixture_exposure,
+    withhold_legacy_wc_without_direct_evidence,
     render_progression,
     render_wr_pool,
     selected_rows,
@@ -27,6 +28,53 @@ from comp_climbing_app import (
 
 
 class CanadianPilotProjectionTests(unittest.TestCase):
+    def test_legacy_wc_is_withheld_when_only_youth_world_evidence_exists(self) -> None:
+        athletes = pd.DataFrame({
+            "pool": ["Boulder_Women", "Boulder_Women"],
+            "global_id": ["AMARI", "MADISON"],
+            "WC+-ELO": [1942.8, 1978.8],
+            "WC+-ELO evidence": [2.0, 12.0],
+        })
+        history = pd.DataFrame({
+            "pool": ["Boulder_Women", "Boulder_Women"],
+            "global_id": ["AMARI", "MADISON"],
+            "source_scope": ["IFSC", "IFSC"],
+            "source_event_id": ["1418", "1411"],
+            "event_name": [
+                "IFSC Youth World Championships Helsinki 2025",
+                "IFSC World Cup Bern 2025",
+            ],
+        })
+
+        safe, audit = withhold_legacy_wc_without_direct_evidence(athletes, history)
+
+        amari = safe.loc[safe["global_id"].eq("AMARI")].iloc[0]
+        madison = safe.loc[safe["global_id"].eq("MADISON")].iloc[0]
+        self.assertTrue(pd.isna(amari["WC+-ELO"]))
+        self.assertTrue(pd.isna(amari["WC+-ELO evidence"]))
+        self.assertEqual(amari["direct_senior_wc_competitions"], 0)
+        self.assertEqual(
+            amari["legacy_wc_display_status"],
+            "WITHHELD_NO_DIRECT_SENIOR_WC_EVIDENCE",
+        )
+        self.assertEqual(float(madison["WC+-ELO"]), 1978.8)
+        self.assertEqual(madison["direct_senior_wc_competitions"], 1)
+        self.assertEqual(int(audit.iloc[0]["legacy_wc_rows_withheld"]), 1)
+
+    def test_deployed_amari_legacy_wc_is_not_publicly_presented(self) -> None:
+        athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
+        history = pd.read_parquet("data/boulder_overview_history.parquet")
+        safe, _ = withhold_legacy_wc_without_direct_evidence(athletes, history)
+        rows = safe.loc[
+            safe["athlete_name"].astype(str).str.contains(
+                "Bourbonnais Amari", case=False, na=False
+            )
+        ]
+        self.assertGreaterEqual(len(rows), 1)
+        self.assertTrue(rows["WC+-ELO"].isna().all())
+        self.assertTrue(rows["WC+-ELO evidence"].isna().all())
+        self.assertTrue(rows["direct_senior_wc_competitions"].eq(0).all())
+
     def test_current_bundle_exposes_wc_plus_not_nonexistent_wr_elo(self) -> None:
         athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
         self.assertIn("WC+-ELO", RATING_ORDER)
