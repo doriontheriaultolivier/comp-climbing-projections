@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import unittest
 
+from streamlit.testing.v1 import AppTest
 
 PATH = Path(__file__).parents[1] / "style_tagging_app.py"
 SPEC = importlib.util.spec_from_file_location("style_tagging_app", PATH)
@@ -27,6 +28,17 @@ PROBLEM = {
 
 
 class StyleTaggingAppTest(unittest.TestCase):
+    def test_standalone_entrypoint_renders_with_governed_inventory(self) -> None:
+        app = AppTest.from_file(str(PATH)).run(timeout=120)
+        self.assertFalse(app.exception)
+        self.assertFalse(app.error)
+        self.assertEqual(app.title[0].value, "Comp Climbing Boulder Tags")
+        self.assertEqual(
+            [control.label for control in app.selectbox[:4]],
+            ["Competition", "Round", "Terrain", "Boulder"],
+        )
+        self.assertIn("Save style-tag proposal", [button.label for button in app.button])
+
     def test_standalone_tagger_owns_its_data_path(self) -> None:
         self.assertEqual(module.DATA, PATH.parents[0] / "data")
         self.assertNotIn("from comp_climbing_app import", PATH.read_text(encoding="utf-8"))
