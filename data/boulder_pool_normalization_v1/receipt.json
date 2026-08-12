@@ -1,0 +1,16 @@
+{
+  "schema": "boulder-pool-normalization-audit-v1",
+  "status": "PASS",
+  "source_rows": 421530,
+  "boulder_rows": 180484,
+  "youth_boulder_rows": 83660,
+  "unexpected_boulder_pool_rows": 0,
+  "non_boulder_rows_in_boulder_pools": 0,
+  "contract": "discipline is authoritative; pool is a normalized sex pool; youth/adult status remains separate and original category is retained",
+  "unknown_labels_are_not_guessed": true,
+  "authority": {
+    "model_fit": false,
+    "promotion": false
+  },
+  "input_sha256": "f6a2e0d84c65fba323bc70f60ce2894d54ec67bcecee6608a409575f18380a71"
+}

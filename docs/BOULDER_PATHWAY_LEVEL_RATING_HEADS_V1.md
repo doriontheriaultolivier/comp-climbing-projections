@@ -17,8 +17,8 @@ athletes who compete at multiple levels.
 | Head | Direct evidence | Transfer treatment | Primary coaching use |
 |---|---|---|---|
 | `FED:<code>` | within one federation's governed competitions | partially pooled federation offset/temperature; bridge athletes connect to higher levels | domestic dominance, depth and promotion readiness |
-| `NACS` | North American Cup Series | direct NACS plus learned FED→NACS and NACS→WC transfer | continental readiness and field selection |
-| `IFSC-REG:<region>` | IFSC regional/continental series | region-specific head, partially pooled across regions | regional pathway readiness |
+| `INTERFED:North-America` | North American Cup Series | direct NACS plus learned FED→inter-federation→continental/world transfer | cross-border readiness below the full Pan America continental layer |
+| `CONT:<Africa|Asia|Europe|Oceania|Pan-America>` | recognised Continental Series and Championships | region-specific head, partially pooled across continents through the shared graph | continental readiness and pathway comparison |
 | `WC` | World Cups and World Championships | direct WC/WCH likelihood with lower-level transfer estimated, never assumed | elite comparison and target-event forecasting |
 | `IFSC-World-Youth` | Youth World Championships | separate transition context, partially pooled through shared skill and estimated WC transfer | youth ordering and adult-WC transition without treating youth results as adult WC results |
 | `OLYM-scenario` | fixed Olympic field/format scenario | derived primarily from WC state and exact Olympic format | conditional Olympic placement/readiness, not a standalone Elo |
@@ -26,6 +26,51 @@ athletes who compete at multiple levels.
 `OLYM` should remain a scenario rather than a fitted independent rating until
 there are enough comparable Olympic events. One event every four years cannot
 separately identify form, field, format and athlete skill.
+
+Every competition family also has a youth variant when a distinct youth event
+exists. Youth is not a suffix that merely changes the label: it is a separate
+context response connected to adult contexts through the athlete's shared
+time-varying skill and empirically estimated transition. Youth World results do
+not directly update the adult World head.
+
+## How the full graph influences every head
+
+No result is assigned exclusively to one rating. For athlete `i`, time `t`, and
+target context `c`, the predictive readiness is conceptually
+
+`eta(i,t,c) = shared_skill(i,t) + context_response(i,t,c)`.
+
+Every valid result updates `shared_skill`. A result directly observed in context
+`d` also updates `context_response(d)`. Its effect on another target context `c`
+is learned from the historical competition graph rather than imposed by a
+manual level multiplier. Candidate transfer structures must use only
+pre-event evidence and may include:
+
+- shared-athlete connectivity between contexts;
+- recency and number of bridge athletes;
+- uncertainty in both source and target context states;
+- empirically identified context-transition residuals;
+- later, governed terrain/item-distribution distance when Boulder Tags provides
+  adequate route-style evidence.
+
+The effect should shrink smoothly as connection evidence weakens. It must not
+be `result_weight = 1 / hand-chosen graph distance`: graph distance is partly a
+missing-data property, highly connected elite athletes are selectively sampled,
+and terrain difficulty/style may mediate rather than merely attenuate transfer.
+Compare at least these chronological candidates:
+
+1. fully pooled shared skill (no context response);
+2. independent Gaussian context offsets with strong shrinkage;
+3. hierarchical context offsets grouped by federation/inter-federation/
+   continental/world and youth/adult family;
+4. graph-kernel or multilevel transition effects estimated from bridge athletes;
+5. the same structures with terrain distance only after the tagging evidence is
+   frozen and available at each historical forecast date.
+
+Weakly connected contexts remain forecastable through shared skill but should
+show wider uncertainty and stronger shrinkage. They are not automatically set
+to zero and are not promoted solely because they cross a fixed event-count
+threshold.
 
 ## The two-anchor display scale
 
@@ -43,6 +88,16 @@ This gives the proposed interpretations exactly:
 
 - 2000 = 50% semifinal probability;
 - 3000 = 50% final probability.
+
+The scale is intentionally unbounded. Athletes may appear below 1000 when the
+validated probability model supports that distance below semifinal level; do
+not impose a chess-like floor or manually widen the distribution. Conversely,
+an athlete with no direct target-context starts may still receive a transferred
+projection, but it must be labelled as projected, show its transfer path and
+uncertainty, and never be counted as direct evidence. The legacy Amari
+Bourbonnais WC+ case is the regression example: two Youth Worlds were
+incorrectly counted as senior WC+ evidence and then heavily shifted by the
+display normalization.
 
 It is a good communication layer because the distance now has a pathway-specific
 meaning. It does **not** by itself fix calibration: any affine transform can

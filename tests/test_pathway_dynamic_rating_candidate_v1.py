@@ -18,7 +18,7 @@ def test_taxonomy_translation_keeps_scenarios_shared_and_youth_world_separate():
     assert model_domain("IFSC_WORLD_YOUTH") == "ifsc_world_youth"
     assert model_domain("WC") == "wc"
     assert model_domain("OLYM_SCENARIO_INPUT") == "other"
-    assert model_domain("IFSC_REG:UNRESOLVED") == "other"
+    assert model_domain("CONT:UNRESOLVED") == "other"
 
 
 def test_quarantine_and_unknown_labels_fail_closed():

@@ -1,0 +1,23 @@
+pathway_target_domain,direct_event_contexts,recent_event_contexts,direct_athletes,athletes_also_observed_in_wc,wc_bridge_fraction,pools,first_event_date,last_event_date,support_interpretation
+other,895,551,15768,1275,0.0808599695585997,2,1998-07-11,2026-07-16,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_fasi,412,354,2920,52,0.01780821917808219,2,2019-01-19,2026-04-25,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+wc,358,70,3223,3223,1.0,2,1999-07-02,2026-06-17,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_usac_youth,317,317,7136,3,0.0004204035874439462,2,2025-06-05,2026-06-26,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_sac_cas,188,61,1719,99,0.05759162303664921,2,1998-11-13,2026-06-28,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_fasi_youth,166,166,1529,9,0.005886200130804447,2,2021-02-07,2026-04-18,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_cec_youth,125,125,2369,13,0.005487547488391726,2,2022-03-26,2026-05-14,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+cont_europe_youth,108,44,2861,646,0.2257951765117092,2,2011-09-10,2026-06-11,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_sac_cas_youth,77,13,910,67,0.07362637362637363,2,2000-11-10,2026-05-31,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_fedme,61,61,320,33,0.103125,2,2022-06-04,2026-06-20,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+cont_europe,60,36,1295,955,0.7374517374517374,2,2002-07-11,2026-07-17,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_cec,48,48,754,42,0.05570291777188329,2,2021-11-27,2026-02-28,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+cont_asia,46,12,636,360,0.5660377358490566,2,2001-11-23,2026-04-08,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+fed_usac,32,32,537,59,0.10986964618249534,2,2021-03-25,2026-06-07,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+interfed_north_america,20,20,805,69,0.08571428571428572,2,2022-08-20,2026-06-04,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+ifsc_world_youth,18,12,2161,644,0.2980101804720037,2,2017-08-30,2026-07-18,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+cont_asia_youth,16,6,665,151,0.22706766917293233,2,2015-12-02,2025-08-20,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+cont_pan_america,8,8,338,105,0.3106508875739645,2,2021-11-30,2026-07-25,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+cont_oceania,4,4,118,22,0.1864406779661017,2,2024-11-16,2026-02-28,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+cont_africa,2,2,23,3,0.13043478260869565,2,2021-12-16,2021-12-16,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+cont_oceania_youth,2,0,45,17,0.37777777777777777,2,2017-10-12,2017-10-12,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate
+interfed_north_america_youth,2,2,30,0,0.0,2,2025-04-05,2025-04-05,continuous evidence measure; controls shrinkage/uncertainty and never constitutes a binary model-promotion gate

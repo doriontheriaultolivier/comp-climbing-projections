@@ -92,10 +92,13 @@ def classify_direct_context(row: pd.Series) -> tuple[str, str]:
     if source == "IFSC" and tier in IFSC_REGIONAL_TIERS:
         family = regional_family(name)
         if family is None:
-            return "IFSC_REG:UNRESOLVED", "continental tier lacks one unambiguous region token"
-        return f"IFSC_REG:{family}{youth_suffix}", "direct IFSC regional/continental evidence"
+            return "CONT:UNRESOLVED", "continental tier lacks one unambiguous region token"
+        return f"CONT:{family}{youth_suffix}", "direct continental Series/Championship evidence"
     if source in {"CEC", "USAC"} and tier == "Continental / cross-border" and "nacs" in lower:
-        return "NACS" + youth_suffix, "direct NACS evidence"
+        return (
+            "INTERFED:NORTH_AMERICA" + youth_suffix,
+            "direct North American inter-federation circuit evidence (NACS)",
+        )
     if source in FEDERATION_SOURCES and tier in FEDERATION_TIERS:
         return f"FED:{source}{youth_suffix}", "direct federation-level evidence"
     return "SHARED_BRIDGE_ONLY", "valid shared-skill evidence without a governed direct target-head label"
@@ -103,12 +106,16 @@ def classify_direct_context(row: pd.Series) -> tuple[str, str]:
 
 def build_event_taxonomy(rows: pd.DataFrame) -> pd.DataFrame:
     required = (
-        "event_date", "event_name", "source_scope", "event_tier", "rating_context"
+        "event_date", "event_name", "source_scope", "event_tier", "rating_context",
+        "pool",
     )
     missing = set(required) - set(rows.columns)
     if missing:
         raise TaxonomyError(f"history missing columns: {sorted(missing)}")
-    events = rows[list(required)].drop_duplicates().copy()
+    events = rows.loc[
+        rows["pool"].astype(str).isin({"Boulder_Men", "Boulder_Women"}),
+        list(required),
+    ].drop_duplicates().copy()
     events["event_date"] = pd.to_datetime(events["event_date"], errors="raise").dt.date.astype(str)
     labels = [classify_direct_context(row) for _, row in events.iterrows()]
     events["direct_context_head"] = [label for label, _ in labels]
@@ -125,7 +132,10 @@ def run(input_path: Path, event_output: Path, report_output: Path) -> dict:
         input_path,
         compression="infer",
         low_memory=False,
-        usecols=["event_date", "event_name", "source_scope", "event_tier", "rating_context"],
+        usecols=[
+            "event_date", "event_name", "source_scope", "event_tier",
+            "rating_context", "pool",
+        ],
     )
     events = build_event_taxonomy(rows)
     counts = events.groupby("direct_context_head").size().sort_values(ascending=False)
@@ -152,8 +162,9 @@ def run(input_path: Path, event_output: Path, report_output: Path) -> dict:
         "authority": {"model_fit": False, "rating_promotion": False, "deployment": False},
     }
     event_output.parent.mkdir(parents=True, exist_ok=True)
-    events.to_csv(event_output, index=False)
-    report_output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    events.to_csv(event_output, index=False, lineterminator="\n")
+    with report_output.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(report, indent=2) + "\n")
     return report
 
 

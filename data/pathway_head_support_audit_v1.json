@@ -1,0 +1,18 @@
+{
+  "schema": "pathway-head-support-audit-v1",
+  "status": "RESEARCH_SUPPORT_AUDIT_ONLY",
+  "input_sha256": "ca1322d77fe267f10b0e173e5dcb6f307cada8051a52889bf1e649e5bca92edf",
+  "input_rows": 415035,
+  "heads": 22,
+  "total_direct_event_contexts": 2965,
+  "policy": {
+    "binary_support_threshold_used": false,
+    "unsupported_head_promotion_allowed": false,
+    "evidence_controls_shrinkage_and_uncertainty": true
+  },
+  "authority": {
+    "model_fit": false,
+    "promotion": false,
+    "deployment": false
+  }
+}

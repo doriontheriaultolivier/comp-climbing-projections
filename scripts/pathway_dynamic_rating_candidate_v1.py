@@ -31,17 +31,18 @@ DIRECT_CONTEXT_DOMAINS = (
     "fed_sac_cas_youth",
     "fed_fedme",
     "fed_fedme_youth",
-    "nacs",
-    "nacs_youth",
-    "ifsc_reg_africa",
-    "ifsc_reg_asia",
-    "ifsc_reg_asia_youth",
-    "ifsc_reg_europe",
-    "ifsc_reg_europe_youth",
-    "ifsc_reg_oceania",
-    "ifsc_reg_oceania_youth",
-    "ifsc_reg_pan_america",
-    "ifsc_reg_pan_america_youth",
+    "interfed_north_america",
+    "interfed_north_america_youth",
+    "cont_africa",
+    "cont_africa_youth",
+    "cont_asia",
+    "cont_asia_youth",
+    "cont_europe",
+    "cont_europe_youth",
+    "cont_oceania",
+    "cont_oceania_youth",
+    "cont_pan_america",
+    "cont_pan_america_youth",
     "ifsc_world_youth",
     "wc",
 )
@@ -66,7 +67,7 @@ def model_domain(direct_context_head: str) -> str:
     if label in {
         "SHARED_BRIDGE_ONLY",
         "OLYM_SCENARIO_INPUT",
-        "IFSC_REG:UNRESOLVED",
+        "CONT:UNRESOLVED",
     }:
         return REFERENCE_DOMAIN
     translated = label.casefold().replace(":", "_").replace("-", "_")
