@@ -1,9 +1,11 @@
 import pytest
+import pandas as pd
 
 from scripts.dynamic_boulder_rating import DynamicBoulderRating
 from scripts.pathway_dynamic_rating_candidate_v1 import (
     DIRECT_CONTEXT_DOMAINS,
     PathwayCandidateError,
+    attach_pathway_model_domains,
     model_domain,
     pathway_ablation_configs,
     pathway_candidate_config,
@@ -46,3 +48,28 @@ def test_ablation_panel_does_not_overclaim_hierarchical_pooling():
     }
     assert not panel["fully_pooled_no_context_offsets"].enable_target_offsets
     assert panel["fixed_independent_shrunk_context_offsets"].enable_target_offsets
+
+
+def test_row_adapter_preserves_auditable_quarantine_and_shared_updates():
+    rows = pd.DataFrame([
+        {
+            "source_scope": "IFSC",
+            "event_tier": "World major youth",
+            "event_name": "IFSC Youth World Championships Helsinki 2025",
+            "rating_context": "Youth",
+            "rank": 1,
+        },
+        {
+            "source_scope": "CEC",
+            "event_tier": "Regional / local",
+            "event_name": "Test Event",
+            "rating_context": "Senior / Open",
+            "rank": 1,
+        },
+    ])
+    actual = attach_pathway_model_domains(rows)
+    assert actual.loc[0, "pathway_target_domain"] == "ifsc_world_youth"
+    assert bool(actual.loc[0, "pathway_input_eligible"])
+    assert actual.loc[1, "pathway_target_domain"] is None
+    assert not bool(actual.loc[1, "pathway_input_eligible"])
+    assert actual["rank"].tolist() == [1, 1]

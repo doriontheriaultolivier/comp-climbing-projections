@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pandas as pd
+
+from scripts.audit_pathway_context_taxonomy_v1 import classify_direct_context
 from scripts.dynamic_boulder_rating import DynamicRatingConfig
 
 
@@ -27,6 +30,7 @@ DIRECT_CONTEXT_DOMAINS = (
     "fed_sac_cas",
     "fed_sac_cas_youth",
     "fed_fedme",
+    "fed_fedme_youth",
     "nacs",
     "nacs_youth",
     "ifsc_reg_africa",
@@ -37,6 +41,7 @@ DIRECT_CONTEXT_DOMAINS = (
     "ifsc_reg_oceania",
     "ifsc_reg_oceania_youth",
     "ifsc_reg_pan_america",
+    "ifsc_reg_pan_america_youth",
     "ifsc_world_youth",
     "wc",
 )
@@ -82,6 +87,35 @@ def pathway_candidate_config(
         reference_domain=REFERENCE_DOMAIN,
         enable_target_offsets=True,
     )
+
+
+def attach_pathway_model_domains(rows: pd.DataFrame) -> pd.DataFrame:
+    """Attach audited direct and model-domain labels without consulting outcomes.
+
+    Quarantined fixtures remain in the returned audit frame with
+    ``pathway_input_eligible=False``. Callers must filter on that explicit flag;
+    no row is silently discarded.
+    """
+
+    required = {
+        "source_scope",
+        "event_tier",
+        "event_name",
+        "rating_context",
+    }
+    missing = required - set(rows.columns)
+    if missing:
+        raise PathwayCandidateError(f"rows missing taxonomy columns: {sorted(missing)}")
+    output = rows.copy()
+    classified = [classify_direct_context(row) for _, row in output.iterrows()]
+    output["direct_context_head"] = [label for label, _ in classified]
+    output["direct_context_reason"] = [reason for _, reason in classified]
+    output["pathway_input_eligible"] = output["direct_context_head"].ne("QUARANTINE")
+    output["pathway_target_domain"] = [
+        model_domain(label) if label != "QUARANTINE" else None
+        for label in output["direct_context_head"]
+    ]
+    return output
 
 
 def pathway_ablation_configs(
