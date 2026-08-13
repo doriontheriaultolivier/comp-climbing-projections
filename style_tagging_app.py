@@ -739,6 +739,18 @@ def main() -> None:
             visible = pd.DataFrame(shared)
             columns = [key for key in ("submitted_at_utc", "competition_date", "competition", "round", "gender_terrain", "boulder", "confidence", "image_public_url") if key in visible]
             st.dataframe(visible[columns], hide_index=True, width="stretch")
+            st.download_button(
+                "Download full shared review history",
+                json.dumps(shared, ensure_ascii=False, indent=2),
+                "comp_climbing_shared_style_tags.json",
+                "application/json",
+            )
+            if len(shared) >= 3000:
+                st.warning(
+                    "The shared export reached the 3,000-record backend limit. "
+                    "Archive this file before collecting enough additional reviews "
+                    "to exceed the window."
+                )
         else:
             st.caption("No shared tags yet.")
 
