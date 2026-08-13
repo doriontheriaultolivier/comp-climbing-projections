@@ -2131,12 +2131,13 @@ def render_joint_temperature_shadow() -> None:
     shadow = load_joint_temperature_shadow()
     if shadow is None:
         return
-    st.subheader("Shadow probability calibration")
+    st.subheader("Retired shadow calibration evidence")
     st.caption(
-        "A 2024-fitted probability-sharpening layer improved named-matchup and "
-        "placement scores in locked 2025 and 2026 competitions while preserving "
-        "one joint ranking distribution. It is not yet applied to the current "
-        "athlete cards below."
+        "A historical 2024-fitted probability-sharpening layer improved named-matchup "
+        "and placement scores in locked 2025 and 2026 competitions. It is retained "
+        "as diagnostic evidence only: its Stage-A prediction scale is superseded, the "
+        "fresh reproducible run selected no replacement model, and it is not applied "
+        "to current athlete cards or target-event probabilities."
     )
     columns = st.columns(2)
     for column, row in zip(columns, shadow["results"]):
@@ -2212,8 +2213,9 @@ def render_probability_spectrum_shadow() -> None:
     st.warning(
         "The raw V4 probability link was too compressed toward 50%: athletes on "
         "the stronger side of the rating spectrum won much more often than the raw "
-        "probabilities implied. The target-event scenario therefore uses the locked "
-        "T=3 shadow scale while remaining explicitly research-only.",
+        "probabilities implied. The former T=3 repair is now retired because it is "
+        "bound to a superseded Stage-A prediction scale; the target-event panel stays "
+        "unavailable until a fresh model passes chronological selection.",
         icon="⚠️",
     )
     with st.expander("Chronological repair, age diagnostics and CNR coverage"):
