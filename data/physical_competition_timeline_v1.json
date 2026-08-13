@@ -1,0 +1,37 @@
+{
+  "schema": "physical-competition-chronological-timeline-public-receipt-v1",
+  "status": "DESCRIPTIVE_CHRONOLOGICAL_TIMELINE_READY_NO_MODEL_FIT",
+  "bindings": {
+    "physical_observations_sha256": "734c9238f2cd1a90a1f8b4b8af915b67a742d9784789bd6f2c0c3a694d8b234a",
+    "board_observations_sha256": "90ee678e9163d6bdb05928cda06d8b223e17ef12422c2dd65923bcf05eada270",
+    "governed_links_sha256": "e82c7b2d794aa39f4a9c18bc38e95abc41681442726b86de21a9b55ce84a1b0c",
+    "source_results_sha256": "f6a2e0d84c65fba323bc70f60ce2894d54ec67bcecee6608a409575f18380a71"
+  },
+  "coverage": {
+    "athletes": 20,
+    "observations": 613,
+    "competition_fields": 172,
+    "pairs": 10436,
+    "physical_pairs": 7636,
+    "board_pairs": 2800,
+    "horizon_days": 365,
+    "source_counts": {
+      "CEC": 9039,
+      "IFSC": 971,
+      "SAC-CAS": 26,
+      "USAC": 364,
+      "VL-GLOBAL": 36
+    }
+  },
+  "restricted_output_sha256": "d8ceb978db661ec81f8771ad57bfc549934c52b84a4c9941da57832aa47df0f6",
+  "claims": {
+    "observation_strictly_precedes_result": true,
+    "current_rating_used_as_historical_target": false,
+    "linear_ceiling_model_fit": false,
+    "pair_rows_are_effective_sample_size": false,
+    "missing_values_imputed_low": false,
+    "training_prescription_authorized": false,
+    "competition_prediction_authorized": false
+  },
+  "next_gate": "Aggregate by athlete-event and add reviewed boulder-demand tags before comparing monotone support and transfer candidates."
+}
