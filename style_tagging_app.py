@@ -375,7 +375,10 @@ def shared_records_url(url: str, limit: int = 100) -> str:
 @st.cache_data(show_spinner=False, ttl=120, max_entries=1)
 def load_shared_records(url: str) -> tuple[list[dict[str, object]], str]:
     try:
-        with urlrequest.urlopen(shared_records_url(url), timeout=15) as response:
+        # 535 governed items and two independent reviews already require more
+        # than 1,000 records. The old 100-record default eventually made
+        # completed items appear unfinished again.
+        with urlrequest.urlopen(shared_records_url(url, 3000), timeout=15) as response:
             answer = json.loads(response.read().decode("utf-8"))
         records = answer.get("records", [])
         if not answer.get("ok") or not isinstance(records, list):
