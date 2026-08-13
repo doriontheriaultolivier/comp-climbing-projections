@@ -40,7 +40,25 @@ class ProjectedWcReadinessDisplayTest(unittest.TestCase):
         self.assertIn("not access/selection probability", displayed["caption"])
         self.assertIn("not a conservative lower bound", displayed["caption"])
         self.assertIn("No direct Senior/Open WC+ start", displayed["caption"])
+        self.assertIn("0/78 reached a semifinal", displayed["caption"])
+        self.assertIn("mean forecast was 5.4%", displayed["caption"])
         self.assertIn("never enters the direct-WC leaderboard", displayed["caption"])
+
+    def test_evidence_class_context_is_continuous_not_a_truth_cliff(self) -> None:
+        one = self.projection.assign(direct_senior_open_wc_plus_competitions=1)
+        one_display = projected_wc_readiness_display(
+            self.athlete, one, {"verified": True}
+        )
+        self.assertIn("6/58 reached a semifinal", one_display["caption"])
+        self.assertIn("mean forecast was 13.7%", one_display["caption"])
+
+        established = self.projection.assign(
+            direct_senior_open_wc_plus_competitions=2
+        )
+        established_display = projected_wc_readiness_display(
+            self.athlete, established, {"verified": True}
+        )
+        self.assertIn("established 2+ evidence class", established_display["caption"])
 
     def test_unverified_artifact_never_uses_legacy_wc_value(self) -> None:
         displayed = projected_wc_readiness_display(
