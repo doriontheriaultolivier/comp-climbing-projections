@@ -2708,11 +2708,19 @@ def projected_wc_readiness_display(
         or not np.isfinite(direct)
     ):
         return unavailable
-    evidence = (
-        f"{int(direct)} direct Senior/Open WC+ competition(s)"
-        if direct > 0
-        else "No direct Senior/Open WC+ start; counterfactual graph-transfer estimate"
-    )
+    if direct <= 0:
+        evidence = (
+            "No direct Senior/Open WC+ start; counterfactual graph-transfer estimate. "
+            "Locked 2026 zero-prior class: 0/78 reached a semifinal while the mean "
+            "forecast was 5.4%"
+        )
+    elif direct < 2:
+        evidence = (
+            "1 direct Senior/Open WC+ competition. Locked 2026 one-prior class: 6/58 "
+            "reached a semifinal while the mean forecast was 13.7%"
+        )
+    else:
+        evidence = f"{int(direct)} direct Senior/Open WC+ competitions; established 2+ evidence class"
     return {
         "available": True,
         "value": f"{probability:.1%}",
