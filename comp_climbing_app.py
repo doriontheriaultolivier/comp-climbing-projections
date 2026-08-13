@@ -2656,13 +2656,13 @@ def projected_wc_readiness_display(
     current_projection: pd.DataFrame | None,
     projection_metadata: dict[str, object] | None,
 ) -> dict[str, object]:
-    """Describe a verified WC projection without relabelling it direct evidence."""
+    """Describe the entrant-conditional WC estimand without inventing a rating."""
 
     unavailable = {
         "available": False,
-        "value": "Not yet calibrated",
+        "value": "Unavailable",
         "caption": (
-            "No verified projected WC-readiness posterior is available; "
+            "No verified entrant-conditional WC estimate is available; "
             "no legacy WC value is substituted."
         ),
     }
@@ -2674,7 +2674,7 @@ def projected_wc_readiness_display(
     ):
         return unavailable
     required = {
-        "athlete_id", "pool", "projection_status", "wc_projection_score",
+        "athlete_id", "pool", "projection_status", "semifinal_probability_central",
         "wc_projection_score_sd", "wc_projection_score_sd_source",
         "direct_senior_open_wc_plus_competitions",
     }
@@ -2692,26 +2692,35 @@ def projected_wc_readiness_display(
         or str(row["wc_projection_score_sd_source"]) != "wc_latent_readiness_sd"
     ):
         return unavailable
-    median = pd.to_numeric(pd.Series([row["wc_projection_score"]]), errors="coerce").iloc[0]
+    probability = pd.to_numeric(
+        pd.Series([row["semifinal_probability_central"]]), errors="coerce"
+    ).iloc[0]
     sd = pd.to_numeric(pd.Series([row["wc_projection_score_sd"]]), errors="coerce").iloc[0]
     direct = pd.to_numeric(
         pd.Series([row["direct_senior_open_wc_plus_competitions"]]), errors="coerce"
     ).iloc[0]
-    if not np.isfinite(median) or not np.isfinite(sd) or sd <= 0 or not np.isfinite(direct):
+    if (
+        not np.isfinite(probability)
+        or probability < 0
+        or probability > 1
+        or not np.isfinite(sd)
+        or sd <= 0
+        or not np.isfinite(direct)
+    ):
         return unavailable
     evidence = (
         f"{int(direct)} direct Senior/Open WC+ competition(s)"
         if direct > 0
-        else "No direct Senior/Open WC+ start; graph-transfer projection only"
+        else "No direct Senior/Open WC+ start; counterfactual graph-transfer estimate"
     )
     return {
         "available": True,
-        "value": f"{median:.0f}",
+        "value": f"{probability:.1%}",
         "caption": (
-            f"Exploratory target-scale coordinate (latent-state SD {sd:.0f}); {evidence}. "
-            "This SD is not a calibrated confidence or predictive interval. The target "
-            "coordinate is not point-for-point comparable with the legacy direct rating "
-            "and never enters its leaderboard."
+            f"Exploratory P(semifinal | starts in the reference WC field); {evidence}. "
+            f"Latent-state SD {sd:.0f} is not a calibrated confidence or predictive "
+            "interval. This is not access/selection probability. It is not a conservative "
+            "lower bound, and it never enters the direct-WC leaderboard."
         ),
     }
 
@@ -2735,7 +2744,7 @@ def render_olympics(
         readiness = projected_wc_readiness_display(
             athlete, current_projection, projection_metadata
         )
-        column.metric("Projected WC readiness", readiness["value"])
+        column.metric("Conditional WC semifinal", readiness["value"])
         column.caption(str(readiness["caption"]))
         rank = integer_observation(
             athlete.get("world_event_rank", np.nan), minimum=1
