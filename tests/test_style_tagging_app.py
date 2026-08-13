@@ -137,9 +137,12 @@ class StyleTaggingAppTest(unittest.TestCase):
 
     def test_reviewer_code_is_pseudonymous_and_bounded(self) -> None:
         self.assertEqual(module.normalize_reviewer_code(" reviewer_01 "), "reviewer_01")
-        self.assertEqual(module.normalize_reviewer_code("a!b@example.com"), "abexamplecom")
         with self.assertRaises(ValueError):
             module.normalize_reviewer_code(" !!! ")
+        with self.assertRaises(ValueError):
+            module.normalize_reviewer_code("ab@example.com")
+        with self.assertRaises(ValueError):
+            module.normalize_reviewer_code("ab")
 
     def test_core_tag_agreement_uses_latest_independent_review(self) -> None:
         base = {

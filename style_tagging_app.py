@@ -386,9 +386,9 @@ def load_shared_records(url: str) -> tuple[list[dict[str, object]], str]:
 
 
 def normalize_reviewer_code(value: object) -> str:
-    code = re.sub(r"[^A-Za-z0-9_-]", "", str(value).strip())[:24]
-    if not code:
-        raise ValueError("Enter a pseudonymous reviewer code")
+    code = str(value).strip()
+    if re.fullmatch(r"[A-Za-z0-9_-]{3,24}", code) is None:
+        raise ValueError("Use 3-24 letters, numbers, underscores or hyphens")
     return code
 
 
