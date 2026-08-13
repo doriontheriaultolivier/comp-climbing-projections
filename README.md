@@ -55,8 +55,9 @@ Task completion is reviewer-specific so a second reviewer can independently tag
 the same Boulder. Duplicate submissions from one code do not count as
 independent agreement evidence. If the
 backend is unavailable, the session export remains a recoverable safety copy.
-The current machine contract is [schema v2](schemas/boulder_style_tag_schema_v2.json);
-[schema v1](schemas/boulder_style_tag_schema_v1.json) remains for older exports.
+The current machine contract is [schema v4](schemas/boulder_style_tag_schema_v4.json);
+[schema v2](schemas/boulder_style_tag_schema_v2.json) and
+[schema v1](schemas/boulder_style_tag_schema_v1.json) remain for older exports.
 
 ## Rating contract
 
