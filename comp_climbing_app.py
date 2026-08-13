@@ -21,6 +21,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from release_identity_senior_wc import senior_wc_direct_evidence_mask
+
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -616,33 +618,6 @@ def quarantine_obvious_fixture_exposure(
         "retained_canadian_identities": int((exposed & cnr_rank.notna()).sum()),
     }])
     return safe_athletes, safe_history, audit
-
-
-def senior_wc_direct_evidence_mask(history: pd.DataFrame) -> pd.Series:
-    """Identify only direct Senior/Open World-level Boulder evidence.
-
-    Youth Worlds are valuable graph evidence but are never direct senior-WC
-    evidence. Continental/Pan-American Series are also transfer evidence, not
-    senior World Cup starts. The legacy WC+-ELO artifact predated this semantic
-    distinction, so the public app withholds it when no direct rows exist.
-    """
-
-    if history.empty:
-        return pd.Series(False, index=history.index, dtype=bool)
-    names = history.get(
-        "event_name", pd.Series("", index=history.index, dtype="string")
-    ).astype("string")
-    senior_name = names.str.contains(
-        r"(?i)\b(?:world\s+(?:climbing\s+)?(?:cup|series|championships?)|"
-        r"olympic(?:\s+qualifier)?(?:\s+series)?|oqs)\b",
-        regex=True,
-        na=False,
-    )
-    youth = names.str.contains(r"(?i)\byouth\b", regex=True, na=False)
-    source = history.get(
-        "source_scope", pd.Series("", index=history.index, dtype="string")
-    ).astype("string").str.upper()
-    return source.eq("IFSC") & senior_name & ~youth
 
 
 def withhold_legacy_wc_without_direct_evidence(

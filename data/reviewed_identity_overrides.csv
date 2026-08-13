@@ -1,0 +1,2 @@
+source_scope,athlete_source_id,ifsc_athlete_id,identity_confidence,reviewer_note,evidence_url
+IFSC,18545,14843,1.0,"Owner-confirmed same Canadian athlete as IFSC 14843. The official profiles have a ten-day birth-date discrepancy; retain IFSC 14843 as canonical. Rebuild ratings chronologically before publishing a merged identity.",https://www.worldclimbing.com/athlete/14843

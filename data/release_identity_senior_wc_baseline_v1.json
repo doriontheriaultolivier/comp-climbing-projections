@@ -1,0 +1,9 @@
+{
+  "base_commit": "fdc657177ab39088f41682e5b498ede610c15a7f",
+  "files": {
+    "athletes": "68bc1066f8f2ed09d6a6558d54ac7377c2f3f93ed086b59efa7055571731a267",
+    "history": "bd3c526b65557841b836ad5ee5e8278d46b2f4648c71fb5da9a855960f641754",
+    "overrides": "20994aede4e2937b5b9f4cf3778e75c41dc83dd04d2ebb99e0e52b3eeb662678"
+  },
+  "schema": "release-identity-senior-wc-baseline-v1"
+}
