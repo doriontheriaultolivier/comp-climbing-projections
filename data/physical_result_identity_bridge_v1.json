@@ -1,0 +1,38 @@
+{
+  "schema": "physical-result-identity-bridge-public-receipt-v1",
+  "status": "RESEARCH_JOIN_READY_MANUAL_REVIEW_REQUIRED_NO_MODEL_INPUT",
+  "bindings": {
+    "physical_profiles_sha256": "805fa62d8494118c250754f47f136ade18a54cc518f0e723f04305ca502d9f6b",
+    "identity_links_sha256": "60a0b42a70b1072e1ad36d596967d2485a23e0c12f31cfb94d4e10e90a253008",
+    "source_results_sha256": "f6a2e0d84c65fba323bc70f60ce2894d54ec67bcecee6608a409575f18380a71",
+    "physical_overrides_sha256": "6bdcb276017f27a4fed4c869e7241d121d5c714736cbc7ce173f02a76c8b5b17",
+    "reviewed_overrides_sha256": "6246e5b08631f3628b142ed0198cbd81576bafbdfe7becf3162593fe9af83c23"
+  },
+  "coverage": {
+    "physical_profiles": 22,
+    "governed_source_links": 52,
+    "profiles_with_governed_non_ifsc_link": 20,
+    "profiles_without_governed_non_ifsc_link": 2,
+    "manual_review_candidates": 7,
+    "digitalrock_governed_links": 0,
+    "governed_source_counts": {
+      "CEC": 20,
+      "IFSC": 23,
+      "SAC-CAS": 1,
+      "USAC": 7,
+      "VL-GLOBAL": 1
+    }
+  },
+  "restricted_outputs": {
+    "governed_links_sha256": "e82c7b2d794aa39f4a9c18bc38e95abc41681442726b86de21a9b55ce84a1b0c",
+    "manual_review_queue_sha256": "dd59db4c1bef49563b0fd5c61392216802f7707201dbcdc188c1c464f27f2c70"
+  },
+  "claims": {
+    "auto_merge_by_name": false,
+    "unresolved_candidates_are_model_inputs": false,
+    "canonical_identity_mutated": false,
+    "rating_input_authorized": false,
+    "physical_ceiling_fit_authorized": false,
+    "research_join_authorized": true
+  }
+}
