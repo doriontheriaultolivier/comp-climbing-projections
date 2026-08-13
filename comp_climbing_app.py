@@ -86,6 +86,7 @@ AGE_PROGRESSION_METHOD = (
 AGE_PROGRESSION_STATUS = "RESEARCH_AGGREGATE_MIN_20_NOT_CAUSAL"
 OBVIOUS_FIXTURE_EVENT_PATTERN = r"(?i)\b(?:test|mock|demo|dummy|sandbox|hidden)\b"
 JOINT_TEMPERATURE_SHADOW_PATH = DATA / "boulder_joint_temperature_shadow_v1.json"
+CURRENT_WC_MODEL_STATUS_PATH = DATA / "current_wc_model_validation_status_v1.json"
 PROBABILITY_SPECTRUM_SHADOW_PATH = (
     DATA / "boulder_probability_spectrum_shadow_v1.json"
 )
@@ -186,6 +187,133 @@ def load_joint_temperature_shadow(
                 and max(row["placement_delta_ci95"]) < 0
             ):
                 return None
+        return value
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def load_current_wc_model_status(
+    path: Path = CURRENT_WC_MODEL_STATUS_PATH,
+) -> dict[str, object] | None:
+    """Load the aggregate, non-production V4 successor status fail-closed."""
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if set(value) != {
+            "schema",
+            "status",
+            "chronology",
+            "models",
+            "results",
+            "validation_guard",
+            "withholding",
+            "source_bindings",
+        }:
+            return None
+        expected_chronology = {
+            "2024": "development",
+            "2025": "untouched_validation",
+            "2026": "descriptive_only",
+        }
+        if (
+            value["schema"] != "current-wc-v4-release-validation-status-v1"
+            or value["status"] != "RESEARCH_CHALLENGER_NOT_PROMOTED"
+            or value["chronology"] != expected_chronology
+            or value["models"]
+            != {
+                "baseline": "identity_correct_v4_scale400",
+                "challenger": "additive_tanh_c0.5_a200",
+            }
+        ):
+            return None
+        results = value["results"]
+        if (
+            not isinstance(results, list)
+            or [row.get("year") for row in results] != [2025, 2026]
+        ):
+            return None
+        expected_result_keys = {
+            "year",
+            "role",
+            "competitions",
+            "canonical_pairs",
+            "baseline_pair_log_loss",
+            "challenger_pair_log_loss",
+            "baseline_pair_brier",
+            "challenger_pair_brier",
+            "baseline_placement_rps",
+            "challenger_placement_rps",
+        }
+        for row in results:
+            if set(row) != expected_result_keys:
+                return None
+            if row["role"] != expected_chronology[str(row["year"])]:
+                return None
+            numeric = [item for key, item in row.items() if key != "role"]
+            if any(
+                isinstance(item, bool) or not np.isfinite(float(item))
+                for item in numeric
+            ):
+                return None
+            if not (
+                row["challenger_pair_log_loss"] < row["baseline_pair_log_loss"]
+                and row["challenger_pair_brier"] < row["baseline_pair_brier"]
+                and row["challenger_placement_rps"]
+                < row["baseline_placement_rps"]
+            ):
+                return None
+        guard = value["validation_guard"]
+        if set(guard) != {
+            "year",
+            "scope",
+            "competitions",
+            "baseline_pair_log_loss",
+            "challenger_pair_log_loss",
+            "pair_log_loss_delta",
+            "probability_of_harm",
+            "diagnosis",
+        }:
+            return None
+        if not (
+            guard["year"] == 2025
+            and guard["scope"] == "CEC_vs_CEC"
+            and int(guard["competitions"]) >= 20
+            and guard["challenger_pair_log_loss"]
+            > guard["baseline_pair_log_loss"]
+            and guard["pair_log_loss_delta"] > 0
+            and guard["probability_of_harm"] >= 0.9
+            and np.isclose(
+                guard["challenger_pair_log_loss"]
+                - guard["baseline_pair_log_loss"],
+                guard["pair_log_loss_delta"],
+                atol=1e-12,
+                rtol=0.0,
+            )
+        ):
+            return None
+        withholding = value["withholding"]
+        if withholding != {
+            "applied_to_current_athlete_cards": False,
+            "applied_to_target_event_probabilities": False,
+            "current_zero_or_one_wc_start_central_values_published": False,
+            "current_intervals_published": False,
+        }:
+            return None
+        bindings = value["source_bindings"]
+        if set(bindings) != {
+            "v4_full_replay_manifest_sha256",
+            "v4_independent_verification_sha256",
+            "native_baseline_audit_receipt_sha256",
+            "challenger_decision_receipt_sha256",
+            "shadow_receipt_sha256",
+            "cec_harm_audit_receipt_sha256",
+        } or any(
+            len(str(item)) != 64
+            or any(char not in "0123456789abcdef" for char in str(item))
+            for item in bindings.values()
+        ):
+            return None
         return value
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return None
@@ -2185,6 +2313,64 @@ def render_joint_temperature_shadow() -> None:
         )
 
 
+def render_current_wc_model_status() -> None:
+    """Render the current aggregate model decision without exposing forecasts."""
+    status = load_current_wc_model_status()
+    if status is None:
+        return
+    st.subheader("Current probability-model validation")
+    st.caption(
+        "The identity-correct V4 replay passed independent recomputation. A probability-scale "
+        "challenger selected using 2024 improved both named-matchup and placement accuracy in "
+        "untouched 2025 data, but it is not promoted because it materially worsened CEC fields."
+    )
+    rows = {row["year"]: row for row in status["results"]}
+    row = rows[2025]
+    columns = st.columns(3)
+    pair_delta = row["challenger_pair_log_loss"] - row["baseline_pair_log_loss"]
+    brier_delta = row["challenger_pair_brier"] - row["baseline_pair_brier"]
+    placement_delta = row["challenger_placement_rps"] - row["baseline_placement_rps"]
+    columns[0].metric(
+        "2025 pair log loss",
+        f"{row['challenger_pair_log_loss']:.4f}",
+        f"{pair_delta:.4f}",
+        delta_color="inverse",
+    )
+    columns[1].metric(
+        "2025 pair Brier",
+        f"{row['challenger_pair_brier']:.4f}",
+        f"{brier_delta:.4f}",
+        delta_color="inverse",
+    )
+    columns[2].metric(
+        "2025 placement RPS",
+        f"{row['challenger_placement_rps']:.4f}",
+        f"{placement_delta:.4f}",
+        delta_color="inverse",
+    )
+    st.caption(
+        f"Untouched validation: {row['competitions']:,} competition fields and "
+        f"{row['canonical_pairs']:,} canonical pairs. Lower is better."
+    )
+    guard = status["validation_guard"]
+    st.warning(
+        "Not promoted: the same challenger increased CEC-vs-CEC pair log loss by "
+        f"{guard['pair_log_loss_delta']:.4f} across {guard['competitions']} competitions. "
+        "The harm is concentrated in youth and large rating-gap comparisons; it was not "
+        "explained by duplicate pairs or identity-key inflation."
+    )
+    with st.expander("What is active, withheld, and next"):
+        st.markdown(
+            "- The independently replayed V4 identity baseline remains the research reference; "
+            "the challenger is a shadow comparison only.\n"
+            "- Neither model changes current athlete cards or target-event probabilities here.\n"
+            "- Current central WC projections for athletes with zero or one prior Senior/Open "
+            "WC start remain withheld; no new uncertainty intervals are published.\n"
+            "- The next test is prospective CEC context capture with competition-cluster "
+            "validation, not fitting a correction to the failed 2025 subgroup."
+        )
+
+
 def render_probability_spectrum_shadow() -> None:
     """Explain whether frozen pair probabilities reflected demonstrated level."""
     spectrum = load_probability_spectrum_shadow()
@@ -3303,7 +3489,7 @@ def main() -> None:
         data["current_wc_projection"],
         data.get("current_wc_projection_metadata"),
     )
-    render_joint_temperature_shadow()
+    render_current_wc_model_status()
     render_probability_spectrum_shadow()
 
     st.header("Overview")
