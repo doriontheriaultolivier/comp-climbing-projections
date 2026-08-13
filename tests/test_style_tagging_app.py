@@ -131,6 +131,37 @@ class StyleTaggingAppTest(unittest.TestCase):
         self.assertEqual(result.iloc[1]["priority_status"], "General governed inventory")
         self.assertEqual(len(result), 2)
 
+    def test_ranked_review_milestones_report_cumulative_information(self) -> None:
+        priority = pd.read_csv(
+            Path(__file__).parents[1]
+            / "data"
+            / "physical_item_tagging_priority_v1_1.csv"
+        )
+        result = module.tagging_coverage_milestones(priority)
+        self.assertEqual(result["Reviewed items"].tolist(), [10, 25, 50, 100])
+        self.assertEqual(
+            result["Top|Zone discordant pairs"].tolist(),
+            [62, 103, 130, 130],
+        )
+        self.assertEqual(result["Zone discordant pairs"].tolist(), [0, 18, 31, 108])
+        self.assertEqual(result["Athlete-item links"].tolist(), [57, 130, 189, 393])
+
+    def test_tagger_renders_incremental_review_table(self) -> None:
+        app = AppTest.from_file(str(PATH)).run(timeout=120)
+        self.assertFalse(app.exception)
+        tables = [item.value for item in app.dataframe]
+        milestone = next(
+            table for table in tables if "Reviewed items" in table.columns
+        )
+        self.assertEqual(milestone["Reviewed items"].tolist(), [10, 25, 50, 100])
+        self.assertEqual(int(milestone.iloc[2]["Top|Zone discordant pairs"]), 130)
+        self.assertTrue(
+            any(
+                "not independent competitions" in str(item.value)
+                for item in app.caption
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
