@@ -21,6 +21,7 @@ class PhysicalCompetitionTimelineTest(unittest.TestCase):
             SNAPSHOT / "board_observations.csv",
             ROOT / ".artifacts/physical-result-identity-bridge-v1/governed_links.csv",
             ROOT / "data/source_results.csv.gz",
+            ROOT / "data/pathway_context_event_taxonomy_v1.csv",
             horizon_days=365,
         )
         self.assertGreater(len(timeline), 0)
@@ -28,6 +29,10 @@ class PhysicalCompetitionTimelineTest(unittest.TestCase):
         self.assertFalse(timeline["model_input_authorized"].any())
         self.assertFalse(receipt["claims"]["linear_ceiling_model_fit"])
         self.assertFalse(receipt["claims"]["current_rating_used_as_historical_target"])
+        self.assertGreater(receipt["coverage"]["fixture_result_rows_quarantined"], 0)
+        self.assertNotIn("TEST (Quota management)", set(timeline["event_name"]))
+        self.assertNotIn("Test speed", set(timeline["event_name"]))
+        self.assertIn("discipline", timeline.columns)
 
 
 if __name__ == "__main__":

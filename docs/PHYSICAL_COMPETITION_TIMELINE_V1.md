@@ -5,8 +5,9 @@ with a current rating. Every row links one dated physical or Kilter observation
 to a competition result strictly 1–365 days later through the governed identity
 bridge.
 
-Coverage is 613 observations, 20 athletes, 172 later competition fields and
-10,436 observation-result pairs. Pair rows are not independent observations and
+Coverage is 613 observations, 20 athletes, 170 later competition fields and
+10,406 observation-result pairs. Three joined rows from explicitly quarantined
+test events were removed using the governed event taxonomy. Pair rows are not independent observations and
 must not be reported as the effective sample size. CEC dominates the current
 coverage; source and competition clustering are mandatory.
 

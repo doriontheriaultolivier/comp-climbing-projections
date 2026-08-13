@@ -5,25 +5,27 @@
     "physical_observations_sha256": "734c9238f2cd1a90a1f8b4b8af915b67a742d9784789bd6f2c0c3a694d8b234a",
     "board_observations_sha256": "90ee678e9163d6bdb05928cda06d8b223e17ef12422c2dd65923bcf05eada270",
     "governed_links_sha256": "e82c7b2d794aa39f4a9c18bc38e95abc41681442726b86de21a9b55ce84a1b0c",
-    "source_results_sha256": "f6a2e0d84c65fba323bc70f60ce2894d54ec67bcecee6608a409575f18380a71"
+    "source_results_sha256": "f6a2e0d84c65fba323bc70f60ce2894d54ec67bcecee6608a409575f18380a71",
+    "event_taxonomy_sha256": "da0508febcfc48646ceb062b28e097d949b83cba994720eab666c5d0c3e25eca"
   },
   "coverage": {
     "athletes": 20,
     "observations": 613,
-    "competition_fields": 172,
-    "pairs": 10436,
-    "physical_pairs": 7636,
-    "board_pairs": 2800,
+    "competition_fields": 170,
+    "pairs": 10406,
+    "physical_pairs": 7612,
+    "board_pairs": 2794,
     "horizon_days": 365,
+    "fixture_result_rows_quarantined": 3,
     "source_counts": {
-      "CEC": 9039,
+      "CEC": 9009,
       "IFSC": 971,
       "SAC-CAS": 26,
       "USAC": 364,
       "VL-GLOBAL": 36
     }
   },
-  "restricted_output_sha256": "d8ceb978db661ec81f8771ad57bfc549934c52b84a4c9941da57832aa47df0f6",
+  "restricted_output_sha256": "7ffee65badb9bccda030d88e903d1a580332c1bf66233beb8b82488b66408d64",
   "claims": {
     "observation_strictly_precedes_result": true,
     "current_rating_used_as_historical_target": false,

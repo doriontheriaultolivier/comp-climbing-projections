@@ -26,6 +26,7 @@ def build_timeline(
     board_path: Path,
     governed_links_path: Path,
     results_path: Path,
+    event_taxonomy_path: Path,
     *,
     horizon_days: int = 365,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
@@ -33,9 +34,11 @@ def build_timeline(
     board = pd.read_csv(board_path)
     links = pd.read_csv(governed_links_path)
     results = pd.read_csv(results_path, low_memory=False)
+    taxonomy = pd.read_csv(event_taxonomy_path, low_memory=False)
     physical["observed_on"] = pd.to_datetime(physical["observed_on"], errors="raise")
     board["observed_on"] = pd.to_datetime(board["observed_on"], errors="raise")
     results["event_date"] = pd.to_datetime(results["event_date"], errors="coerce")
+    taxonomy["event_date"] = pd.to_datetime(taxonomy["event_date"], errors="raise")
     links["athlete_source_id"] = links["athlete_source_id"].astype(str)
     results["athlete_source_id"] = results["athlete_source_id"].astype(str)
 
@@ -48,6 +51,20 @@ def build_timeline(
         validate="many_to_many",
     )
     resolved = resolved.loc[resolved["event_date"].notna()].copy()
+    quarantine = taxonomy.loc[
+        taxonomy["direct_context_head"].astype(str).eq("QUARANTINE"),
+        ["event_date", "event_name", "source_scope"],
+    ].drop_duplicates()
+    quarantine["fixture_quarantine"] = True
+    resolved = resolved.merge(
+        quarantine,
+        on=["event_date", "event_name", "source_scope"],
+        how="left",
+        validate="many_to_one",
+    )
+    fixture_mask = resolved["fixture_quarantine"].eq(True)
+    fixture_rows = int(fixture_mask.sum())
+    resolved = resolved.loc[~fixture_mask].copy()
     resolved = resolved.sort_values(
         ["global_id", "event_date", "source_scope", "source_event_id", "round_name"],
         kind="stable",
@@ -104,7 +121,7 @@ def build_timeline(
         "capacity_dimension", "protocol_id", "observed_on", "value", "unit",
         "reporting_window_days", "source_revision", "days_to_competition",
         "event_date", "source_scope_competition", "source_event_id", "event_name",
-        "pool_competition", "category", "round_name", "rank_numeric", "n_athletes",
+        "discipline", "pool_competition", "category", "round_name", "rank_numeric", "n_athletes",
         "rank_pct", "tops", "zones", "top_attempts", "zone_attempts",
         "format_identifier", "chronology_status", "descriptive_only",
         "model_input_authorized",
@@ -133,6 +150,7 @@ def build_timeline(
             "board_observations_sha256": sha256(board_path),
             "governed_links_sha256": sha256(governed_links_path),
             "source_results_sha256": sha256(results_path),
+            "event_taxonomy_sha256": sha256(event_taxonomy_path),
         },
         "coverage": {
             "pairs": int(len(joined)),
@@ -145,6 +163,7 @@ def build_timeline(
             "physical_pairs": int(joined["observation_family"].eq("physical").sum()),
             "board_pairs": int(joined["observation_family"].eq("board").sum()),
             "horizon_days": int(horizon_days),
+            "fixture_result_rows_quarantined": fixture_rows,
             "source_counts": {
                 str(key): int(value)
                 for key, value in joined["source_scope_competition"].value_counts().items()
@@ -173,11 +192,12 @@ def main() -> int:
     parser.add_argument("--board", type=Path, required=True)
     parser.add_argument("--links", type=Path, required=True)
     parser.add_argument("--results", type=Path, required=True)
+    parser.add_argument("--event-taxonomy", type=Path, required=True)
     parser.add_argument("--horizon-days", type=int, default=365)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     timeline, report = build_timeline(
-        args.physical, args.board, args.links, args.results,
+        args.physical, args.board, args.links, args.results, args.event_taxonomy,
         horizon_days=args.horizon_days,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
