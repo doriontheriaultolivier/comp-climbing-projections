@@ -20,6 +20,7 @@ from comp_climbing_app import (
     pool_scatter,
     progression_projection,
     quarantine_obvious_fixture_exposure,
+    read_data,
     withhold_legacy_wc_without_direct_evidence,
     render_progression,
     render_wr_pool,
@@ -275,6 +276,7 @@ class CanadianPilotProjectionTests(unittest.TestCase):
                 float(dylan["bridge_probability_evidence_class_sensitivity"])
             )
         )
+
         self.assertGreaterEqual(int(dylan["model_gate_anchored_events"]), 1)
         self.assertGreaterEqual(
             int(dylan["model_gate_unique_anchored_opponents"]), 1
@@ -331,6 +333,24 @@ class CanadianPilotProjectionTests(unittest.TestCase):
                 available["model_gate_anchored_events"], errors="raise"
             ).gt(0).all()
         )
+
+    def test_reviewed_amari_split_is_visible_but_derived_outputs_are_withheld(self) -> None:
+        data = read_data()
+        athlete = data["athletes"].loc[
+            data["athletes"]["global_id"].eq("IFSC:14843")
+        ].iloc[0]
+        self.assertTrue(bool(athlete["identity_rebuild_pending"]))
+        self.assertTrue(pd.isna(athlete["Global-ELO"]))
+        self.assertTrue(pd.isna(athlete["Global-ELO evidence"]))
+        self.assertTrue(pd.isna(athlete["WC+-ELO"]))
+        self.assertFalse(
+            data["current_wc_projection"]["athlete_id"].eq("IFSC:14843").any()
+        )
+        audit = data["reviewed_split_identity_quarantine"]
+        self.assertTrue(audit["quarantine_active"])
+        self.assertEqual(audit["alias_history_rows"], 2)
+        self.assertEqual(audit["projection_rows_withheld"], 1)
+        self.assertEqual(audit["history_rows_changed"], 0)
 
     def test_current_projection_artifact_is_bound_and_tamper_closed(self) -> None:
         projection, metadata = load_current_wc_projection_artifact(Path("data"))

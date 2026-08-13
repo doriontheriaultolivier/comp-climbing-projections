@@ -24,6 +24,90 @@ REVIEWED_ALIAS_GLOBAL_ID = "IFSC:18545"
 REVIEWED_CANONICAL_GLOBAL_ID = "IFSC:14843"
 
 
+def quarantine_reviewed_split_identity_outputs(
+    athletes: pd.DataFrame,
+    projection: pd.DataFrame,
+    history: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]:
+    """Withhold derived outputs whose chronology predates a reviewed merge.
+
+    The canonical and alias histories cannot be joined after ratings have
+    already been computed.  Until the producer replays the accepted mapping,
+    keep the canonical profile selectable but remove its derived ratings and
+    current projection.  Raw history remains available for audit.
+    """
+
+    athlete_ids = athletes.get(
+        "global_id", pd.Series("", index=athletes.index, dtype="string")
+    ).astype(str)
+    history_ids = history.get(
+        "global_id", pd.Series("", index=history.index, dtype="string")
+    ).astype(str)
+    alias_history_rows = int(history_ids.eq(REVIEWED_ALIAS_GLOBAL_ID).sum())
+    canonical_mask = athlete_ids.eq(REVIEWED_CANONICAL_GLOBAL_ID)
+    if alias_history_rows <= 0:
+        return athletes, projection, {
+            "quarantine_active": False,
+            "canonical_profile_count": int(canonical_mask.sum()),
+            "alias_history_rows": 0,
+            "athlete_rating_values_withheld": 0,
+            "projection_rows_withheld": 0,
+        }
+    if int(canonical_mask.sum()) != 1:
+        raise ValueError("reviewed split identity canonical profile cardinality changed")
+
+    safe_athletes = athletes.copy()
+    rating_columns = [
+        column
+        for column in safe_athletes.columns
+        if "ELO" in column.upper()
+    ]
+    rating_columns.extend(
+        column
+        for column in (
+            "momentum",
+            "canada_projection_all_evidence",
+            "Canada context adjustment",
+            "cec_projected_rating",
+            "cec_context_offset",
+        )
+        if column in safe_athletes.columns and column not in rating_columns
+    )
+    numeric_values = sum(
+        int(pd.notna(safe_athletes.loc[canonical_mask, column]).sum())
+        for column in rating_columns
+    )
+    if rating_columns:
+        safe_athletes.loc[canonical_mask, rating_columns] = pd.NA
+    if "Global-ELO status" in safe_athletes:
+        safe_athletes.loc[
+            canonical_mask, "Global-ELO status"
+        ] = "Withheld pending identity rebuild"
+    safe_athletes.loc[canonical_mask, "identity_rebuild_pending"] = True
+
+    safe_projection = projection.copy()
+    projection_rows_withheld = 0
+    if not safe_projection.empty and "athlete_id" in safe_projection:
+        projection_mask = safe_projection["athlete_id"].astype(str).eq(
+            REVIEWED_CANONICAL_GLOBAL_ID
+        )
+        projection_rows_withheld = int(projection_mask.sum())
+        safe_projection = safe_projection.loc[~projection_mask].copy()
+
+    return safe_athletes, safe_projection, {
+        "quarantine_active": True,
+        "canonical_global_id": REVIEWED_CANONICAL_GLOBAL_ID,
+        "alias_global_id": REVIEWED_ALIAS_GLOBAL_ID,
+        "canonical_profile_count": 1,
+        "alias_history_rows": alias_history_rows,
+        "athlete_rating_values_withheld": numeric_values,
+        "projection_rows_withheld": projection_rows_withheld,
+        "history_rows_changed": 0,
+        "runtime_merge_performed": False,
+        "requires_producer_rebuild": True,
+    }
+
+
 def load_reviewed_identity_overrides(path: Path) -> pd.DataFrame:
     """Load the deliberately narrow, reviewed override ledger.
 

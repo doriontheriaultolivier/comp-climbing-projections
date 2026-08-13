@@ -23,6 +23,7 @@ import streamlit as st
 
 from release_identity_senior_wc import (
     load_reviewed_identity_overrides,
+    quarantine_reviewed_split_identity_outputs,
     senior_wc_direct_evidence_mask,
     suppress_reviewed_alias_profile,
 )
@@ -984,11 +985,20 @@ def read_data() -> dict[str, object]:
     safe_athletes, alias_audit = suppress_reviewed_alias_profile(
         safe_athletes, overrides
     )
+    safe_athletes, projection, split_identity_audit = (
+        quarantine_reviewed_split_identity_outputs(
+            safe_athletes,
+            projection,
+            safe_history,
+        )
+    )
+    output["current_wc_projection"] = projection
     output["athletes"] = safe_athletes
     output["history"] = safe_history
     output["fixture_quarantine"] = fixture_audit
     output["legacy_wc_evidence_audit"] = wc_evidence_audit
     output["reviewed_identity_alias_audit"] = alias_audit
+    output["reviewed_split_identity_quarantine"] = split_identity_audit
     return output
 
 
@@ -2868,6 +2878,14 @@ def render_rating_detail(
                         + ", ".join(integrity["same_name_identity_ids"])
                         + ". Ratings are not combined until the identity is reviewed.",
                         icon="âš ï¸",
+                    )
+                if bool(athlete.get("identity_rebuild_pending", False)):
+                    st.warning(
+                        "This athlete has a reviewed duplicate identity whose "
+                        "competition history has not yet been replayed through "
+                        "the rating producer. Derived ratings and projections "
+                        "are withheld until that chronological rebuild is complete.",
+                        icon="⚠️",
                     )
                 if integrity["status"] != "RATING_EVIDENCE_AVAILABLE":
                     st.info(str(integrity["explanation"]))
