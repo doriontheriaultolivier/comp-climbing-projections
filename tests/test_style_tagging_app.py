@@ -120,6 +120,11 @@ class StyleTaggingAppTest(unittest.TestCase):
             ["https://example.test/exec?action=list&limit=3000"],
         )
 
+    def test_shared_history_has_a_download_path(self) -> None:
+        source = PATH.read_text(encoding="utf-8")
+        self.assertIn('"Download full shared review history"', source)
+        self.assertIn('"comp_climbing_shared_style_tags.json"', source)
+
     def test_completed_boulders_are_hidden_without_reordering_pending_work(self) -> None:
         inventory = pd.DataFrame(
             [
