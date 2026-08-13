@@ -1,0 +1,43 @@
+{
+  "bindings": {
+    "governed_links_sha256": "e82c7b2d794aa39f4a9c18bc38e95abc41681442726b86de21a9b55ce84a1b0c",
+    "identity_safe_sha256": "c62ef406a8725836a645bce6c4b28e92f651730bc96d4d4212a172a16fcb9afb",
+    "staged_problem_evidence": {
+      "cec-1-230.csv.gz": "dc801520aad038f194c117247902b31943dd818e230bfa31193857ac9df0a82b",
+      "ifsc-1185-1531.csv.gz": "83116f6405ba387b65419c152fe5b773f4f5d932882a8e844e86d37f7bed2609"
+    }
+  },
+  "claims": {
+    "calibration_eligibility_weakened": false,
+    "exact_frozen_snapshots_modified": false,
+    "identity_inventory_use_allowed": true,
+    "model_fit_allowed": false,
+    "new_rating_state_imputed": false,
+    "newly_resolved_rows_are_model_inputs": false
+  },
+  "coverage": {
+    "athletes_with_newly_resolved_marker_rows": 0,
+    "governed_links": 52,
+    "governed_nodes_present_in_staged_boulder": 34,
+    "governed_overrides_of_old_node_assignment": 4,
+    "governed_source_nodes": 52,
+    "identity_assignment_changed_rows": 0,
+    "item_calibration_eligible_base": 2067,
+    "item_calibration_eligible_overlay": 2067,
+    "marker_identity_assignment_changed_rows": 0,
+    "marker_identity_eligible_base": 2223,
+    "marker_identity_eligible_overlay": 2223,
+    "newly_calibration_eligible_rows": 0,
+    "newly_identity_resolved_marker_rows": 0,
+    "nodes_already_in_frozen_lookup": 37,
+    "target_boulder_problem_rows_base": 2225,
+    "target_boulder_problem_rows_overlay": 2225
+  },
+  "restricted_output": {
+    "bytes": 1,
+    "rows": 0,
+    "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "schema": "physical-item-identity-overlay-audit-v2",
+  "status": "RESEARCH_GOVERNED_NODE_CONFLICTS_MONITORED_NO_EFFECTIVE_ITEM_CHANGE"
+}

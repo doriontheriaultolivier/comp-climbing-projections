@@ -38,11 +38,19 @@ The governed physical-result identity bridge now covers two tested athletes
 problem bridge, and several athletes gain governed USAC/SAC links. A V2
 rematerialization could therefore add legitimate exact-item evidence.
 
-That rerun is not yet reproducible: the required
-`scripts/boulder_terrain_problem_adapter.py` exists only as an untracked file in
-the core worktree (observed SHA-256
-`8da160f257460b0c5aa467baca58f6c23d8161d66bedc449acdbfe12888b1ac4`).
-Its tests are also untracked. V1 remains frozen evidence; no V2 counts or queue
-replacement should be claimed until the adapter, focused tests and input
-closure are versioned and hash-bound. Copying mutable code into this lane would
-not close that dependency.
+The full adapter closure is now versioned: adapter/test commit `7633959`, plus
+its source-semantics and terrain-response dependency closure `b84cbbb` in the
+core research repository (cherry-picked here as `902c72d` and `168454a`). The
+combined closure passes 65 tests plus 12 subtests from this clean worktree.
+
+The governed V2 overlay does **not** enlarge the calibration-ready item set or
+the aggregate physical-athlete coverage. It identifies four conflicts with old
+source-node assignments, but zero staged Boulder rows change assignment because
+exact frozen round snapshots take precedence; the strict calibration contract
+therefore remains unchanged. The two
+physical athletes absent from the old snapshot (`IFSC:17186` and `IFSC:599`)
+have only Lead rows in the currently staged IFSC problem evidence. These facts
+are useful negative evidence: they prevent an unnecessary model rerun and keep
+identity inventory separate from rating-state imputation. A future
+identity-correct chronological replay could make some reassigned rows eligible,
+but this audit never invents that state.
