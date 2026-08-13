@@ -49,6 +49,11 @@ write images to Google Drive and rows to Google Sheets through the Apps Script
 backend in `deployment/google_apps_script/style_tag_backend.gs`. Configure the
 Apps Script property `STYLE_TAG_FOLDER_ID`, deploy it as an anonymous web app,
 then add its `/exec` URL to Streamlit secrets as `STYLE_TAG_WEBHOOK_URL`. If the
+tagger is shared by multiple reviewers, each person uses a stable pseudonymous
+3-24 character reviewer code (letters, numbers, `_` or `-`; no name or email).
+Task completion is reviewer-specific so a second reviewer can independently tag
+the same Boulder. Duplicate submissions from one code do not count as
+independent agreement evidence. If the
 backend is unavailable, the session export remains a recoverable safety copy.
 The current machine contract is [schema v2](schemas/boulder_style_tag_schema_v2.json);
 [schema v1](schemas/boulder_style_tag_schema_v1.json) remains for older exports.
