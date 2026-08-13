@@ -35,18 +35,7 @@ jobs:
           video_boulder_segmentation.py
           video_boulder_wall_frame_plan.py
       - name: Run release acceptance tests
-        run: >-
-          python -m pytest -q
-          tests/test_app_smoke.py
-          tests/test_comp_climbing_pilot.py
-          tests/test_projected_wc_readiness_display.py
-          tests/test_release_identity_senior_wc.py
-          tests/test_build_release_identity_successor_v2.py
-          tests/test_style_tagging_app.py
-          tests/test_joint_temperature_shadow.py
-          tests/test_target_event_scenario.py
-          tests/test_boulder_anchor_discovery_packet.py
-          tests/test_boulder_anchor_expansion_v2.py
-          tests/test_boulder_anchor_verification_workflow.py
-          tests/test_video_boulder_anchor_discovery.py
-          tests/test_video_boulder_wall_frame_plan.py
+        # Run every tracked release test. An explicit filename list drifted
+        # behind merged safeguards for identity status, calibration spectrum,
+        # current-model status and the physical coaching slice.
+        run: python -m pytest -q
