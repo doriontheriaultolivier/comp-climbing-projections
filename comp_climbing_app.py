@@ -2637,10 +2637,77 @@ def integer_observation(
     return str(int(numeric))
 
 
+def projected_wc_readiness_display(
+    athlete: pd.Series,
+    current_projection: pd.DataFrame | None,
+    projection_metadata: dict[str, object] | None,
+) -> dict[str, object]:
+    """Describe a verified WC projection without relabelling it direct evidence."""
+
+    unavailable = {
+        "available": False,
+        "value": "Not yet calibrated",
+        "caption": (
+            "No verified projected WC-readiness posterior is available; "
+            "no legacy WC value is substituted."
+        ),
+    }
+    if (
+        not projection_metadata
+        or projection_metadata.get("verified") is not True
+        or current_projection is None
+        or current_projection.empty
+    ):
+        return unavailable
+    required = {
+        "athlete_id", "pool", "projection_status", "wc_projection_score",
+        "wc_projection_score_sd", "wc_projection_score_sd_source",
+        "direct_senior_open_wc_plus_competitions",
+    }
+    if not required.issubset(current_projection.columns):
+        return unavailable
+    rows = current_projection.loc[
+        current_projection["athlete_id"].astype(str).eq(str(athlete.get("global_id", "")))
+        & current_projection["pool"].astype(str).eq(str(athlete.get("pool", "")))
+    ]
+    if len(rows) != 1:
+        return unavailable
+    row = rows.iloc[0]
+    if (
+        str(row["projection_status"]) != "exploratory_current_reference_available"
+        or str(row["wc_projection_score_sd_source"]) != "wc_latent_readiness_sd"
+    ):
+        return unavailable
+    median = pd.to_numeric(pd.Series([row["wc_projection_score"]]), errors="coerce").iloc[0]
+    sd = pd.to_numeric(pd.Series([row["wc_projection_score_sd"]]), errors="coerce").iloc[0]
+    direct = pd.to_numeric(
+        pd.Series([row["direct_senior_open_wc_plus_competitions"]]), errors="coerce"
+    ).iloc[0]
+    if not np.isfinite(median) or not np.isfinite(sd) or sd <= 0 or not np.isfinite(direct):
+        return unavailable
+    z80 = 1.2815515655446004
+    lower, upper = median - z80 * sd, median + z80 * sd
+    evidence = (
+        f"{int(direct)} direct Senior/Open WC+ competition(s)"
+        if direct > 0
+        else "No direct Senior/Open WC+ start; graph-transfer projection only"
+    )
+    return {
+        "available": True,
+        "value": f"{median:.0f}",
+        "caption": (
+            f"Posterior median; 80% latent-readiness interval {lower:.0f}–{upper:.0f}. "
+            f"{evidence}. This projection never enters the direct WC leaderboard."
+        ),
+    }
+
+
 def render_olympics(
     athletes: pd.DataFrame,
     selected: list[str],
     correlations: pd.DataFrame,
+    current_projection: pd.DataFrame | None = None,
+    projection_metadata: dict[str, object] | None = None,
 ) -> None:
     st.subheader("Towards the Olympics")
     st.caption("A single view of World readiness, World Ranking access and evidence gaps. It does not claim qualification before the LA28 rules and field are modelled.")
@@ -2650,7 +2717,12 @@ def render_olympics(
         column.markdown(f"#### {friendly_name(athlete['athlete_name'])}")
         column.metric("Global-ELO", f"{athlete.get('Global-ELO', np.nan):.0f}" if pd.notna(athlete.get("Global-ELO")) else "—")
         column.metric("IFSC-ELO", f"{athlete.get('IFSC-ELO', np.nan):.0f}" if pd.notna(athlete.get("IFSC-ELO")) else "—")
-        column.metric("WC+-ELO", f"{athlete.get('WC+-ELO', np.nan):.0f}" if pd.notna(athlete.get("WC+-ELO")) else "—")
+        column.metric("Direct WC rating", f"{athlete.get('WC+-ELO', np.nan):.0f}" if pd.notna(athlete.get("WC+-ELO")) else "—")
+        readiness = projected_wc_readiness_display(
+            athlete, current_projection, projection_metadata
+        )
+        column.metric("Projected WC readiness", readiness["value"])
+        column.caption(str(readiness["caption"]))
         rank = integer_observation(
             athlete.get("world_event_rank", np.nan), minimum=1
         )
@@ -3194,7 +3266,13 @@ def main() -> None:
             athletes, data["history"], data["age_progression"],
             selected, data["correlations"],
         ),
-        "Towards Olympics": lambda: render_olympics(athletes, selected, data["correlations"]),
+        "Towards Olympics": lambda: render_olympics(
+            athletes,
+            selected,
+            data["correlations"],
+            data["current_wc_projection"],
+            data.get("current_wc_projection_metadata"),
+        ),
     }
     renderers[section]()
 

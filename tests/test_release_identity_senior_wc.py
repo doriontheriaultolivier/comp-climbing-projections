@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -11,12 +12,22 @@ from release_identity_senior_wc import (
     senior_wc_direct_evidence_mask,
 )
 from scripts.audit_release_identity_senior_wc_v1 import verify
+from scripts.audit_release_identity_senior_wc_v1 import canonical_text_sha256
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseIdentitySeniorWcTests(unittest.TestCase):
+    def test_override_hash_is_portable_across_line_endings(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
+            root = Path(temporary)
+            lf = root / "lf.csv"
+            crlf = root / "crlf.csv"
+            lf.write_bytes(b"a,b\n1,2\n")
+            crlf.write_bytes(b"a,b\r\n1,2\r\n")
+            self.assertEqual(canonical_text_sha256(lf), canonical_text_sha256(crlf))
+
     def test_reviewed_ledger_is_exactly_one_known_mapping(self) -> None:
         ledger = load_reviewed_identity_overrides(ROOT / "data" / "reviewed_identity_overrides.csv")
         self.assertEqual(ledger[["source_scope", "athlete_source_id", "ifsc_athlete_id"]].values.tolist(), [["IFSC", "18545", "14843"]])

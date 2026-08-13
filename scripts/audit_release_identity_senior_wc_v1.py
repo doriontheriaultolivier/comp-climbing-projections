@@ -38,10 +38,19 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def canonical_text_sha256(path: Path) -> str:
+    """Hash governed CSV text independently of Git's platform EOL checkout."""
+
+    text = path.read_text(encoding="utf-8")
+    canonical = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def verify(root: Path = ROOT) -> dict[str, object]:
     baseline = json.loads((root / "data" / BASELINE.name).read_text(encoding="utf-8"))
     expected = baseline["files"]
     actual = {name: sha256(root / "data" / filename) for name, filename in FILES.items()}
+    actual["overrides"] = canonical_text_sha256(root / "data" / FILES["overrides"])
     if actual != expected:
         raise ValueError("release identity baseline binding mismatch")
     overrides = load_reviewed_identity_overrides(root / "data" / FILES["overrides"])
