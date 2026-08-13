@@ -2,6 +2,9 @@ __pycache__/
 *.py[cod]
 *.log
 .pytest_cache/
+.artifacts/
+.tmp-pytest-*/
+tmp/
 .streamlit/secrets.toml
 .env
 .venv/
