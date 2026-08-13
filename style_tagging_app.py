@@ -135,6 +135,18 @@ def build_record(
 
 
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=1)
+def tagging_priority_queue() -> pd.DataFrame:
+    priority_path = DATA / "physical_item_tagging_priority_v1_1.csv"
+    if not priority_path.exists():
+        priority_path = DATA / "physical_item_tagging_priority_v1.csv"
+    return (
+        pd.read_csv(priority_path, low_memory=False)
+        if priority_path.exists()
+        else pd.DataFrame()
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=1)
 def problem_inventory() -> pd.DataFrame:
     path = DATA / "boulder_problem_inventory.csv.gz"
     if not path.exists():
@@ -142,10 +154,7 @@ def problem_inventory() -> pd.DataFrame:
     frame = pd.read_csv(path, low_memory=False)
     frame["event_name"] = frame["event_name"].fillna("").astype(str).str.strip()
     frame["event_date"] = pd.to_datetime(frame["event_date"], errors="coerce")
-    priority_path = DATA / "physical_item_tagging_priority_v1_1.csv"
-    if not priority_path.exists():
-        priority_path = DATA / "physical_item_tagging_priority_v1.csv"
-    priority = pd.read_csv(priority_path, low_memory=False) if priority_path.exists() else pd.DataFrame()
+    priority = tagging_priority_queue()
     return apply_tagging_priority(frame.loc[frame["event_name"].ne("")], priority)
 
 
@@ -237,6 +246,51 @@ def problem_display(row: pd.Series) -> str:
     return route
 
 
+def tagging_coverage_milestones(
+    priority: pd.DataFrame,
+    milestones: tuple[int, ...] = (10, 25, 50, 100),
+) -> pd.DataFrame:
+    """Summarize cumulative information unlocked by ranked human review.
+
+    Linked-athlete counts are athlete-item links and may repeat one athlete
+    across several items. Pair counts are within-item comparison opportunities,
+    not independent observations or claims of model readiness.
+    """
+    required = {
+        "priority_rank",
+        "competition_id",
+        "linked_athletes",
+        "board_linked_outcomes",
+        "top_given_zone_discordant_pairs",
+        "zone_discordant_pairs",
+    }
+    if priority.empty or not required.issubset(priority.columns):
+        return pd.DataFrame()
+    rows = priority.copy()
+    for column in required - {"competition_id"}:
+        rows[column] = pd.to_numeric(rows[column], errors="coerce")
+    rows = rows.loc[rows["priority_rank"].notna()].sort_values(
+        "priority_rank", kind="stable"
+    )
+    result: list[dict[str, int]] = []
+    for requested in milestones:
+        count = min(int(requested), len(rows))
+        if count <= 0:
+            continue
+        selected = rows.head(count)
+        result.append({
+            "Reviewed items": count,
+            "Competitions touched": int(selected["competition_id"].nunique()),
+            "Athlete-item links": int(selected["linked_athletes"].sum()),
+            "Board-linked outcomes": int(selected["board_linked_outcomes"].sum()),
+            "Top|Zone discordant pairs": int(
+                selected["top_given_zone_discordant_pairs"].sum()
+            ),
+            "Zone discordant pairs": int(selected["zone_discordant_pairs"].sum()),
+        })
+    return pd.DataFrame(result)
+
+
 def backend_url() -> str:
     try:
         return str(st.secrets.get("STYLE_TAG_WEBHOOK_URL", "")).strip()
@@ -294,6 +348,15 @@ def main() -> None:
         "lets one reviewed tag serve multiple source records; priority is continuous, not "
         "an inclusion cutoff."
     )
+    milestones = tagging_coverage_milestones(tagging_priority_queue())
+    if not milestones.empty:
+        st.markdown("**What a short ranked review session unlocks**")
+        st.dataframe(milestones, hide_index=True, width="stretch")
+        st.caption(
+            "Athlete-item links repeat athletes across items. Discordant-pair counts are "
+            "within-item opportunities for comparing outcomes after a shared demand tag; "
+            "they are not independent competitions or a model-release threshold."
+        )
     st.caption(
         f"The evidence-rich first layer is {top_pair_tasks:,} tasks covering "
         f"{top_pairs:,} exact both-board Top-given-Zone comparisons; the full queue "
