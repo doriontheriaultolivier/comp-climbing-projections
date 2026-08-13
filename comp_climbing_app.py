@@ -1087,6 +1087,9 @@ def read_data() -> dict[str, object]:
         "age_progression": ("boulder_age_progression_reference.csv", "csv"),
         "correlations": ("boulder_rating_correlations.csv", "csv"),
         "rosters": ("program_rosters.csv", "csv"),
+        "physical_profiles": ("physical_test_profiles.csv", "csv"),
+        "physical_priorities": ("physical_athlete_priorities.csv", "csv"),
+        "physical_tagging_queue": ("physical_item_tagging_priority_v1_1.csv", "csv"),
     }
     output: dict[str, object] = {}
     output["projection_cache_release"] = projection_cache_release
@@ -3407,6 +3410,161 @@ def startup_status(data: dict[str, pd.DataFrame]) -> None:
         st.caption("Duplicate controls run before the rating build. Missing specialist evidence is withheld rather than silently replaced.")
 
 
+def coaching_profile_rows(
+    profiles: pd.DataFrame,
+    priorities: pd.DataFrame,
+    selected_athletes: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Join selected athletes to restricted coaching inputs by pool and name.
+
+    The join is deliberately presentation-only. It does not change canonical
+    identities, ratings, or model inputs.
+    """
+    if profiles.empty or selected_athletes.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    selected_keys = selected_athletes[["pool", "athlete_name"]].copy()
+    selected_keys["name_key"] = selected_keys["athlete_name"].map(plain_key)
+    selected_keys = selected_keys.drop_duplicates(["pool", "name_key"])
+
+    profile_rows = profiles.copy()
+    profile_rows["name_key"] = profile_rows["athlete_name"].map(plain_key)
+    profile_rows = profile_rows.merge(
+        selected_keys[["pool", "name_key"]],
+        on=["pool", "name_key"],
+        how="inner",
+        validate="many_to_one",
+    )
+
+    if priorities.empty:
+        return profile_rows, pd.DataFrame()
+    priority_rows = priorities.copy()
+    priority_rows["name_key"] = priority_rows["athlete_name"].map(plain_key)
+    priority_rows = priority_rows.merge(
+        selected_keys[["pool", "name_key"]],
+        on=["pool", "name_key"],
+        how="inner",
+        validate="many_to_one",
+    )
+    return profile_rows, priority_rows
+
+
+def render_physical_board_coaching_slice(
+    athletes: pd.DataFrame,
+    selected: list[str],
+    profiles: pd.DataFrame,
+    priorities: pd.DataFrame,
+    tagging_queue: pd.DataFrame,
+) -> None:
+    """Render the first non-causal capacity-to-expression coaching slice."""
+    focus = selected_rows(athletes, selected)
+    profile_rows, priority_rows = coaching_profile_rows(
+        profiles, priorities, focus
+    )
+    with st.container(border=True):
+        st.header("Capacity → board expression")
+        st.caption(
+            "Private coaching evidence · physical tests and the two Kilter-equivalent "
+            "indicators are shown as separate layers. They do not enter ratings or "
+            "probabilities in this view."
+        )
+        if profile_rows.empty:
+            st.info(
+                "None of the selected athletes currently has a confirmed physical-testing "
+                "profile. Missing tests are missing evidence—not low capacity."
+            )
+            return
+
+        tabs = st.tabs(
+            [friendly_name(row.athlete_name) for row in profile_rows.itertuples(index=False)]
+        )
+        for tab, (_, row) in zip(tabs, profile_rows.iterrows()):
+            with tab:
+                flash = pd.to_numeric(
+                    pd.Series([row.get("boulder_grade_50pct_flash_v")]),
+                    errors="coerce",
+                ).iloc[0]
+                hardest = pd.to_numeric(
+                    pd.Series([row.get("boulder_grade_3x_physical_sends_last_3_months_v")]),
+                    errors="coerce",
+                ).iloc[0]
+                sessions = pd.to_numeric(
+                    pd.Series([row.get("test_sessions")]), errors="coerce"
+                ).iloc[0]
+                last_test = pd.to_datetime(row.get("last_test_date"), errors="coerce")
+                metrics = st.columns(3)
+                metrics[0].metric(
+                    "50%-flash Kilter equivalent",
+                    "—" if pd.isna(flash) else f"V{flash:.1f}",
+                )
+                metrics[1].metric(
+                    "Recent 3-send Kilter equivalent",
+                    "—" if pd.isna(hardest) else f"V{hardest:.1f}",
+                )
+                metrics[2].metric(
+                    "Physical test sessions",
+                    "—" if pd.isna(sessions) else str(int(sessions)),
+                )
+                st.caption(
+                    "50%-flash is a repeatable low-pressure expression indicator; the "
+                    "recent three-send value is an exposure-dependent upper-tail indicator. "
+                    "Their difference is not automatically a weakness, strength, or training target."
+                )
+                athlete_priorities = priority_rows.loc[
+                    (priority_rows["pool"].astype(str) == str(row.get("pool")))
+                    & (priority_rows["name_key"] == row.get("name_key"))
+                ].copy()
+                athlete_priorities["priority_score"] = pd.to_numeric(
+                    athlete_priorities.get("priority_score"), errors="coerce"
+                )
+                focus_candidates = athlete_priorities.loc[
+                    athlete_priorities["recommendation"].eq("Focus candidate")
+                ].sort_values("priority_score", ascending=False)
+                if not focus_candidates.empty:
+                    display = focus_candidates.head(5)[[
+                        "test_name",
+                        "metric_category",
+                        "value",
+                        "unit",
+                        "peer_athletes",
+                        "peer_percentile",
+                        "certainty",
+                    ]].rename(columns={
+                        "test_name": "Physical test",
+                        "metric_category": "Capacity dimension",
+                        "value": "Latest value",
+                        "unit": "Unit",
+                        "peer_athletes": "Peer athletes",
+                        "peer_percentile": "Peer percentile",
+                        "certainty": "Evidence wording",
+                    })
+                    display["Peer percentile"] = pd.to_numeric(
+                        display["Peer percentile"], errors="coerce"
+                    )
+                    st.markdown("**Exploratory physical focus candidates**")
+                    st.dataframe(
+                        display.style.format({"Peer percentile": "{:.0%}"}, na_rep="—"),
+                        hide_index=True,
+                        width="stretch",
+                    )
+                else:
+                    st.info(
+                        "No current physical metric clears the exploratory focus-candidate "
+                        "screen for this athlete. This is not evidence that capacity is complete."
+                    )
+                date_text = "unknown" if pd.isna(last_test) else f"{last_test:%Y-%m-%d}"
+                st.caption(
+                    f"Last recorded test: {date_text} · {row.get('profile_status', 'status unavailable')}"
+                )
+
+        queue_items = len(tagging_queue) if not tagging_queue.empty else 0
+        st.warning(
+            "Competition transfer is not inferred yet. It requires human-confirmed physical-demand "
+            f"tags on the continuously ranked item queue ({queue_items:,} current tasks), followed by "
+            "chronological Zone and Top-given-Zone comparison. Context-expression differences must "
+            "not be presented as psychological causes or causal prescriptions."
+        )
+
+
 def configured_access_password() -> str:
     """Read an optional deployment secret without placing it in source control."""
     configured = os.environ.get("ACCESS_PASSWORD", "")
@@ -3483,6 +3641,13 @@ def main() -> None:
         st.info("Select at least one athlete to begin.")
         st.stop()
     render_rating_detail(athletes, data["history"], selected)
+    render_physical_board_coaching_slice(
+        athletes,
+        selected,
+        data.get("physical_profiles", pd.DataFrame()),
+        data.get("physical_priorities", pd.DataFrame()),
+        data.get("physical_tagging_queue", pd.DataFrame()),
+    )
     render_target_event_scenario(athletes, selected, data["history"])
     render_canadian_projection_pilot(
         athletes,
