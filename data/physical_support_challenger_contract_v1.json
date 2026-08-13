@@ -1,0 +1,95 @@
+{
+  "schema": "physical-support-challenger-contract-v1",
+  "status": "PREREGISTERED_WAITING_FOR_HUMAN_TAG_EVIDENCE",
+  "evidence_bindings": {
+    "physical_competition_timeline_receipt_sha256": "f591b89499bd376312a2bf072cdbaaf1ace0b7a66feac872a556ef7f0a79d71f",
+    "physical_support_estimability_receipt_sha256": "f72c6ee208fd18422e0abb229ccc073ba0a8b62df1ec2cbffc0c40ec6360cb32",
+    "physical_item_tag_unlock_receipt_sha256": "0d138e9cbed883b863be29bd3aac985211dae50156ef9e23c9dae75fbb9c6d27",
+    "physical_item_priority_sha256": "08709c62df2279be5934f9e2953afa39692c36fb865cd57bf761899893bc13d7",
+    "empty_tag_consensus_readiness_receipt_sha256": "8554d8bdcb828d52e2b87ec4baa21b8836b1feedba74f491c147a64672f3253c"
+  },
+  "estimands": [
+    "probability_of_zone_on_exact_tagged_item",
+    "probability_of_top_conditional_on_zone_on_exact_tagged_item"
+  ],
+  "baseline": {
+    "name": "chronological_pre_event_skill_plus_exact_item_difficulty",
+    "future_results_used": false
+  },
+  "candidate_families": [
+    {
+      "name": "baseline_plus_board_expression",
+      "board_inputs": [
+        "kilter_equivalent_50pct_flash_grade",
+        "kilter_equivalent_three_hardest_physical_sends_3mo"
+      ],
+      "grade_semantics": "ordered_categories_not_interval_distances",
+      "shape": "monotone_shrunk_additive"
+    },
+    {
+      "name": "baseline_plus_board_and_physical_support",
+      "physical_inputs": "protocol_preserving_latent_capacity_domains",
+      "tag_interactions": "nonnegative_monotone_shrunk",
+      "shape": "probabilistic_support_surface_not_absolute_ceiling"
+    }
+  ],
+  "deferred_families": [
+    "CES_substitution_surface",
+    "soft_min_frontier",
+    "attempt_hazard",
+    "competition_context_or_stress_effect"
+  ],
+  "selection": {
+    "outer_unit": "whole_physical_competition",
+    "chronology": "expanding_window_by_event_date",
+    "co_primary_scores": [
+      "event_balanced_zone_log_loss",
+      "event_balanced_top_given_zone_log_loss"
+    ],
+    "secondary_scores": [
+      "zone_brier",
+      "top_given_zone_brier",
+      "calibration_intercept",
+      "calibration_slope"
+    ],
+    "candidate_must_show": "proper_score_gain_beyond_monte_carlo_or_optimizer_noise_without_material_whole_competition_harm",
+    "binary_sample_gate": null
+  },
+  "generalization_diagnostics": [
+    "leave_one_athlete_out_or_PSIS_k_when_stable",
+    "leave_one_competition_out_influence",
+    "adult_youth",
+    "rating_spectrum",
+    "source_pathway",
+    "tag_reviewer_count_and_disagreement",
+    "protocol_and_capacity_domain",
+    "measurement_recency"
+  ],
+  "continuous_support": [
+    "posterior_to_prior_variance_reduction",
+    "parameter_effective_sample_size",
+    "PSIS_k_or_whole_competition_influence",
+    "event_cluster_inverse_Herfindahl",
+    "tag_reviewer_range_and_review_count"
+  ],
+  "falsification": [
+    "tag_effects_reverse_materially_across_chronological_origins",
+    "new_athlete_performance_is_worse_than_baseline",
+    "frontier_exceedance_is_systematic",
+    "physical_effect_posterior_is_prior_dominated",
+    "one_competition_or_one_athlete_dominates_the_claim"
+  ],
+  "coaching_output_limits": {
+    "training_prescription_authorized": false,
+    "stress_or_anxiety_inference_authorized": false,
+    "absolute_physical_ceiling_language_authorized": false,
+    "safe_initial_output": "descriptive_prediction_gap_plus_next_observation_needed"
+  },
+  "activation_requirements": {
+    "tag_consensus_receipt_required": true,
+    "human_confirmed_tag_rows_required": true,
+    "chronological_pre_event_skill_required": true,
+    "exact_item_identity_required": true,
+    "current_status": "waiting_for_reviewed_tags"
+  }
+}
