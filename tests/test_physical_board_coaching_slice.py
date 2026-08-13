@@ -6,7 +6,11 @@ import unittest
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from comp_climbing_app import coaching_profile_rows, read_data
+from comp_climbing_app import (
+    coaching_profile_rows,
+    read_data,
+    tested_athlete_options as athlete_explorer_options,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +53,21 @@ class PhysicalBoardCoachingSliceTests(unittest.TestCase):
         self.assertEqual(joined_profiles["test_sessions"].tolist(), [10])
         self.assertEqual(joined_priorities["pool"].tolist(), ["Boulder_Men"])
 
+    def test_tested_athlete_explorer_labels_are_pool_scoped(self) -> None:
+        profiles = pd.DataFrame(
+            {
+                "athlete_name": ["BOIVIN Louka", "BOIVIN Louka"],
+                "pool": ["Boulder_Men", "Boulder_Women"],
+            }
+        )
+        self.assertEqual(
+            athlete_explorer_options(profiles),
+            {
+                "BOIVIN Louka · Boulder_Men": ("BOIVIN Louka", "Boulder_Men"),
+                "BOIVIN Louka · Boulder_Women": ("BOIVIN Louka", "Boulder_Women"),
+            },
+        )
+
     def test_default_app_explains_missing_profile_without_error(self) -> None:
         app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
         app.run(timeout=120)
@@ -64,6 +83,13 @@ class PhysicalBoardCoachingSliceTests(unittest.TestCase):
                 for item in app.info
             )
         )
+        explorer = next(
+            item for item in app.selectbox if item.label == "Explore a tested athlete"
+        )
+        explorer.select("BOIVIN Louka · Boulder_Men").run(timeout=120)
+        metrics = {item.label: item.value for item in app.metric}
+        self.assertEqual(metrics["50%-flash Kilter equivalent"], "V11.3")
+        self.assertEqual(metrics["Recent 3-send Kilter equivalent"], "V12.5")
 
     def test_linked_athlete_shows_both_board_indicators(self) -> None:
         app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
