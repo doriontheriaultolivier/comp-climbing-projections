@@ -139,11 +139,21 @@ def tagging_priority_queue() -> pd.DataFrame:
     priority_path = DATA / "physical_item_tagging_priority_v1_1.csv"
     if not priority_path.exists():
         priority_path = DATA / "physical_item_tagging_priority_v1.csv"
-    return (
+    queue = (
         pd.read_csv(priority_path, low_memory=False)
         if priority_path.exists()
         else pd.DataFrame()
     )
+    coaching_path = DATA / "physical_item_tag_unlock_app_v1.csv"
+    if (
+        coaching_path.exists()
+        and not queue.empty
+        and "problem_id" in queue.columns
+    ):
+        coaching = pd.read_csv(coaching_path, low_memory=False)
+        if "problem_id" in coaching.columns and coaching["problem_id"].is_unique:
+            queue = queue.merge(coaching, on="problem_id", how="left", validate="one_to_one")
+    return queue
 
 
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=1)
@@ -170,6 +180,12 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
     rows["priority_board_linked_outcomes"] = 0
     rows["priority_top_given_zone_pairs"] = 0
     rows["priority_zone_pairs"] = 0
+    rows["coaching_unlock_rank"] = pd.NA
+    rows["coaching_unlock_source_items"] = 0
+    rows["coaching_unlock_athletes"] = pd.NA
+    rows["coaching_unlock_observations"] = pd.NA
+    rows["coaching_unlock_physical_observations"] = pd.NA
+    rows["coaching_unlock_board_observations"] = pd.NA
     required = {
         "source_scope", "source_event_id", "source_round_id", "boulder_number",
         "priority_rank", "linked_athletes", "linked_outcomes",
@@ -188,9 +204,16 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
             "top_given_zone_discordant_pairs": "priority_top_given_zone_pairs",
             "zone_discordant_pairs": "priority_zone_pairs",
         }
+        coaching_optional = {
+            "coaching_unlock_rank": "coaching_unlock_rank",
+            "coaching_athletes_unlocked": "coaching_unlock_athletes",
+            "coaching_observations_unlocked": "coaching_unlock_observations",
+            "physical_observations_unlocked": "coaching_unlock_physical_observations",
+            "board_observations_unlocked": "coaching_unlock_board_observations",
+        }
         queue_columns = list(required) + [
             column for column in optional if column in priority.columns
-        ]
+        ] + [column for column in coaching_optional if column in priority.columns]
         queue = priority[queue_columns].copy()
         for column in keys:
             queue[column] = queue[column].astype(str).str.strip()
@@ -209,6 +232,15 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
                     if source in matched.columns
                 }
             )
+            if "coaching_unlock_rank" in matched.columns:
+                aggregations["coaching_unlock_source_items"] = (
+                    "coaching_unlock_rank", "count"
+                )
+            aggregations.update({
+                output: (source, "min" if source == "coaching_unlock_rank" else "max")
+                for source, output in coaching_optional.items()
+                if source in matched.columns
+            })
             attached = matched.groupby("_inventory_index", as_index=False).agg(
                 **aggregations,
             )
@@ -218,6 +250,10 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
                     "priority_linked_athletes", "priority_linked_outcomes",
                     "priority_board_linked_outcomes",
                     "priority_top_given_zone_pairs", "priority_zone_pairs",
+                    "coaching_unlock_rank", "coaching_unlock_source_items",
+                    "coaching_unlock_athletes", "coaching_unlock_observations",
+                    "coaching_unlock_physical_observations",
+                    "coaching_unlock_board_observations",
                 ]
             ).merge(attached, on="_inventory_index", how="left")
     for column in (
@@ -225,19 +261,38 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
         "priority_top_given_zone_pairs",
         "priority_zone_pairs",
     ):
+        if column not in rows.columns:
+            rows[column] = 0
         rows[column] = rows[column].fillna(0).astype(int)
+    if "coaching_unlock_source_items" not in rows.columns:
+        rows["coaching_unlock_source_items"] = 0
+    rows["coaching_unlock_source_items"] = (
+        rows["coaching_unlock_source_items"].fillna(0).astype(int)
+    )
+    for column in (
+        "coaching_unlock_rank", "coaching_unlock_athletes",
+        "coaching_unlock_observations", "coaching_unlock_physical_observations",
+        "coaching_unlock_board_observations",
+    ):
+        if column not in rows.columns:
+            rows[column] = pd.NA
     rows["priority_status"] = rows["priority_rank"].notna().map(
         {True: "Physical-transfer priority", False: "General governed inventory"}
     )
     return rows.sort_values(
-        ["priority_rank", "event_date", "event_name", "round_group", "gender", "boulder_number"],
-        ascending=[True, False, True, True, True, True], na_position="last", kind="stable",
+        ["coaching_unlock_rank", "priority_rank", "event_date", "event_name", "round_group", "gender", "boulder_number"],
+        ascending=[True, True, False, True, True, True, True], na_position="last", kind="stable",
     ).drop(columns="_inventory_index").reset_index(drop=True)
 
 
-def problem_display(row: pd.Series) -> str:
+def problem_display(row: pd.Series, *, prefer_coaching: bool = True) -> str:
     prefix = {"Men": "M", "Women": "W"}.get(str(row.gender), "B")
     route = f"{prefix}{int(row.boulder_number)} · governed {row.boulder_uid}"
+    if prefer_coaching and pd.notna(row.get("coaching_unlock_rank")):
+        return (
+            f"Coaching {int(row.coaching_unlock_rank)} · {route} · "
+            f"{int(row.coaching_unlock_observations)} dated observations"
+        )
     if pd.notna(row.get("priority_rank")):
         return (
             f"Priority {int(row.priority_rank)} · {route} · "
@@ -361,6 +416,23 @@ def main() -> None:
     if inventory.empty:
         st.error("The governed boulder inventory is unavailable; tagging is disabled until it is restored.")
         return
+    review_order = st.radio(
+        "Review order",
+        ("Coaching evidence unlocked", "Generic physical/Kilter evidence"),
+        horizontal=True,
+        help=(
+            "Coaching order prioritizes pending tags that connect to the most dated "
+            "physical and board observations. Generic order preserves the earlier "
+            "outcome-discordance priority. Neither is a model-readiness threshold."
+        ),
+    )
+    if review_order == "Generic physical/Kilter evidence":
+        inventory = inventory.sort_values(
+            ["priority_rank", "event_date", "event_name", "round_group", "gender", "boulder_number"],
+            ascending=[True, False, True, True, True, True],
+            na_position="last",
+            kind="stable",
+        ).reset_index(drop=True)
     url = backend_url()
     shared: list[dict[str, object]] = []
     shared_error = ""
@@ -434,9 +506,14 @@ def main() -> None:
             round_rows["gender"].dropna().astype(str).drop_duplicates().tolist(),
         )
         terrain_rows = round_rows.loc[round_rows.gender.eq(terrain)]
-        choices = terrain_rows.apply(problem_display, axis=1).tolist()
+        prefer_coaching = review_order == "Coaching evidence unlocked"
+        choices = terrain_rows.apply(
+            lambda row: problem_display(row, prefer_coaching=prefer_coaching), axis=1
+        ).tolist()
         chosen_display = st.selectbox("Boulder", choices)
-        selected_problem = terrain_rows.loc[terrain_rows.apply(problem_display, axis=1).eq(chosen_display)].iloc[0].to_dict()
+        selected_problem = terrain_rows.loc[terrain_rows.apply(
+            lambda row: problem_display(row, prefer_coaching=prefer_coaching), axis=1
+        ).eq(chosen_display)].iloc[0].to_dict()
         st.caption(f"{selected_problem['boulder_count_status']} count: {int(selected_problem['boulder_count'])}; terrain: {selected_problem['terrain_group']}")
         if pd.notna(selected_problem.get("priority_rank")):
             source_items = int(selected_problem.get("priority_source_items", 1))
@@ -455,6 +532,16 @@ def main() -> None:
                     f"Top-given-Zone pair{'s' if top_pairs_for_task != 1 else ''} and "
                     f"{zone_pairs_for_task} Zone pair{'s' if zone_pairs_for_task != 1 else ''}."
                 )
+        if pd.notna(selected_problem.get("coaching_unlock_rank")):
+            st.success(
+                f"Coaching evidence unlock {int(selected_problem['coaching_unlock_rank'])}: "
+                f"the highest-linked exact source item covers "
+                f"{int(selected_problem['coaching_unlock_athletes'])} tested athletes and "
+                f"{int(selected_problem['coaching_unlock_observations'])} dated observations "
+                f"({int(selected_problem['coaching_unlock_physical_observations'])} physical, "
+                f"{int(selected_problem['coaching_unlock_board_observations'])} board). "
+                "Counts prioritize human review only; they contain no athlete identity or test value."
+            )
         confidence = st.select_slider("Confidence", options=("Low", "Moderate", "High"), value="Moderate")
         directions = st.columns(2)
         pre_direction = directions[0].selectbox("Start to Zone direction", ("Up", "Diagonal", "Sideways", "Mixed / unclear"))

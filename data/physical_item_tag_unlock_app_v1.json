@@ -1,0 +1,17 @@
+{
+  "schema": "physical-item-tag-unlock-app-v1",
+  "status": "IDENTITY_FREE_REVIEW_ORDER_ONLY",
+  "source_unlock_output_sha256": "a272c789fc15137cb026b572c4c627f3b6437985842c4958559d381ba62fc91e",
+  "output": {
+    "path": "physical_item_tag_unlock_app_v1.csv",
+    "rows": 535,
+    "sha256": "41a1e5916a20ff6f0b907d1599bf0fb9278104cf33c86dadda3dde673e8c632e"
+  },
+  "claims": {
+    "contains_athlete_identity": false,
+    "contains_physical_test_values": false,
+    "completed_tag": false,
+    "model_input_authorized": false,
+    "coaching_prescription_authorized": false
+  }
+}
