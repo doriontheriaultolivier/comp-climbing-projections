@@ -1,0 +1,41 @@
+{
+  "schema": "physical-support-continuous-estimability-public-receipt-v1",
+  "status": "CONTINUOUS_ESTIMABILITY_PROFILE_READY_NO_MODEL_FIT",
+  "bindings": {
+    "physical_sha256": "734c9238f2cd1a90a1f8b4b8af915b67a742d9784789bd6f2c0c3a694d8b234a",
+    "board_sha256": "90ee678e9163d6bdb05928cda06d8b223e17ef12422c2dd65923bcf05eada270",
+    "athlete_event_bundles_sha256": "3fb4e21b88a577dc921b85f82cd6371781fb50d7b702aed2aba4a330c0bd4ab3",
+    "item_candidates_sha256": "08709c62df2279be5934f9e2953afa39692c36fb865cd57bf761899893bc13d7"
+  },
+  "coverage": {
+    "measurement_profiles": 23,
+    "physical_profiles": 21,
+    "board_profiles": 2,
+    "input_observations": 635,
+    "linked_observations": 613,
+    "linked_event_contexts": 142,
+    "future_event_years": 3
+  },
+  "restricted_output": {
+    "rows": 23,
+    "sha256": "ba8df099b2dc2783c831a5bb2f5d204450ab9ce15850b01464f86eafbde2379e"
+  },
+  "semantics": {
+    "hard_sample_cutoff_used": false,
+    "mcmc_ess_treated_as_data_support": false,
+    "effective_clusters_definition": "inverse Herfindahl index over linked row shares; a concentration diagnostic, not a count of independent events",
+    "pending_item_candidate_is_completed_tag": false,
+    "missing_metric_imputed_low": false,
+    "current_outcomes_used_to_select_model": false
+  },
+  "method_ladder": {
+    "current": "counts/concentration profile and frozen chronological data contract",
+    "next_after_independent_tags": "strongly shrunk monotone additive Zone/Top-given-Zone support challenger",
+    "withheld": [
+      "physical-by-demand interactions before independent tags",
+      "CES/soft-min before stable compensation evidence",
+      "one-sided access/frontier before repeated matched observations",
+      "athlete-specific training prescriptions"
+    ]
+  }
+}
