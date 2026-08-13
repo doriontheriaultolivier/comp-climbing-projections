@@ -49,3 +49,6 @@ def test_shadow_render_is_visibly_research_only() -> None:
     assert "not yet applied to the current athlete cards" in text
     assert "frozen V4 family" in text
     assert "T=3.0" in text
+    assert load_joint_temperature_shadow()["source_bindings"]["stage_a_predictions_sha256"] == (
+        "0723a2bf1dad94f39cf39ad036534309b9610db774a10598fee0a3a0aed496a1"
+    )

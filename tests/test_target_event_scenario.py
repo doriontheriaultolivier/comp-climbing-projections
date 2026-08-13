@@ -110,7 +110,7 @@ def test_missing_specialist_is_withheld_not_replaced_by_global_rating() -> None:
         )
 
 
-def test_target_scenario_ui_states_conditionality_and_limits() -> None:
+def test_target_scenario_ui_fails_closed_on_superseded_shadow() -> None:
     athletes = athlete_fixture().iloc[:3].copy()
     ids = selection_ids()[:3]
     history = pd.DataFrame({"event_date": ["2026-07-25"]})
@@ -122,21 +122,9 @@ def test_target_scenario_ui_states_conditionality_and_limits() -> None:
     assert not app.exception
     assert not app.error
     assert "Target event scenario" in [item.value for item in app.header]
-    captions = [str(item.value) for item in app.caption]
-    assert any("conditional on the manually selected field" in item for item in captions)
-    assert any("same joint ranking draws" in item for item in captions)
     warnings = [str(item.value) for item in app.warning]
-    assert any("does not predict attendance" in item for item in warnings)
-    metrics = {item.label: item.value for item in app.metric}
-    assert "Focus Athlete · P(1st)" in metrics
-    assert metrics["P(top 2)"] != "100.0%"
-    assert metrics["Field entries"] == "3"
-    assert "P(top 3)" not in metrics
-    opponent_tables = [
-        item.value for item in app.dataframe if "Focus beats opponent" in item.value.columns
-    ]
-    assert len(opponent_tables) == 1
-    assert len(opponent_tables[0]) == 2
-    assert "Opponent support" in opponent_tables[0].columns
-    assert opponent_tables[0]["Opponent support"].str.contains("rounds | SD", regex=False).all()
-    assert any("no minimum-round truth switch" in item for item in captions)
+    assert any("temporarily unavailable" in item for item in warnings)
+    assert any("superseded Stage-A prediction scale" in item for item in warnings)
+    assert any("no probability transform is substituted" in item for item in warnings)
+    assert not app.metric
+    assert not app.dataframe

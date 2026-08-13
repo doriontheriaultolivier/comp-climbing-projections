@@ -91,6 +91,9 @@ PROBABILITY_SPECTRUM_SHADOW_PATH = (
 TARGET_SCENARIO_DRAWS = 5000
 TARGET_SCENARIO_EVENT_SD = 155.0
 TARGET_SCENARIO_GUMBEL_SCALE = 400.0 / np.log(10.0)
+SUPERSEDED_STAGE_A_PREDICTIONS_SHA256 = (
+    "0723a2bf1dad94f39cf39ad036534309b9610db774a10598fee0a3a0aed496a1"
+)
 
 
 def transparent(color: str, alpha: float = 0.12) -> str:
@@ -2903,7 +2906,7 @@ def render_target_event_scenario(
     """Render a selected-field research scenario from the locked joint law."""
     shadow = load_joint_temperature_shadow()
     focus = selected_rows(athletes, selected[:1])
-    if shadow is None or focus.empty:
+    if focus.empty:
         return
     focus_row = focus.iloc[0]
     pool = str(focus_row["pool"])
@@ -2916,6 +2919,18 @@ def render_target_event_scenario(
 
     with st.container(border=True):
         st.header("Target event scenario")
+        if (
+            shadow is None
+            or shadow.get("source_bindings", {}).get("stage_a_predictions_sha256")
+            == SUPERSEDED_STAGE_A_PREDICTIONS_SHA256
+        ):
+            st.warning(
+                "Selected-field probabilities are temporarily unavailable. The former "
+                "T=3 shadow was bound to a superseded Stage-A prediction scale; the fresh "
+                "reproducible run selected no replacement model. Rating comparisons remain "
+                "available, but no probability transform is substituted."
+            )
+            return
         st.caption(
             "Research shadow · conditional on the manually selected field. "
             "Named-opponent and placement probabilities are marginals of the same "
