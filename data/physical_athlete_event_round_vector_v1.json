@@ -1,0 +1,31 @@
+{
+  "schema": "physical-athlete-event-round-vector-public-receipt-v1",
+  "status": "DESCRIPTIVE_ATHLETE_EVENT_ROUND_VECTORS_READY_NO_MODEL_FIT",
+  "bindings": {
+    "timeline_sha256": "8d194f5f46010a018a393dea63af69086ca7b7bf4b7bdfc9dc809e5300997858"
+  },
+  "coverage": {
+    "athletes": 20,
+    "observations": 613,
+    "bundles": 5831,
+    "event_contexts": 142,
+    "round_rows_preserved": 10406,
+    "multi_round_bundles": 3750,
+    "discipline_counts": {
+      "Boulder": 2751,
+      "Lead": 2624,
+      "Speed": 456
+    }
+  },
+  "restricted_output_sha256": "3fb4e21b88a577dc921b85f82cd6371781fb50d7b702aed2aba4a330c0bd4ab3",
+  "claims": {
+    "distinct_disciplines_pools_categories_preserved": true,
+    "round_results_preserved_as_vector": true,
+    "synthetic_event_score_created": false,
+    "best_round_selected": false,
+    "model_fit": false,
+    "training_prescription_authorized": false,
+    "competition_prediction_authorized": false
+  },
+  "next_gate": "Join reviewed per-boulder demand tags to Boulder event contexts while retaining untagged events explicitly."
+}

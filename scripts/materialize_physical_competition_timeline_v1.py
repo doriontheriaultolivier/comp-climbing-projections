@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import io
 import json
 from pathlib import Path
 
@@ -19,6 +21,15 @@ def sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def write_deterministic_gzip_csv(frame: pd.DataFrame, path: Path) -> None:
+    with path.open("wb") as raw:
+        with gzip.GzipFile(
+            filename="", mode="wb", compresslevel=9, mtime=0, fileobj=raw
+        ) as compressed:
+            with io.TextIOWrapper(compressed, encoding="utf-8", newline="") as text:
+                frame.to_csv(text, index=False, lineterminator="\n")
 
 
 def build_timeline(
@@ -202,7 +213,7 @@ def main() -> int:
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output_dir / "timeline.csv.gz"
-    timeline.to_csv(output, index=False, compression="gzip", lineterminator="\n")
+    write_deterministic_gzip_csv(timeline, output)
     report["output"] = {"rows": len(timeline), "sha256": sha256(output)}
     (args.output_dir / "receipt.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"

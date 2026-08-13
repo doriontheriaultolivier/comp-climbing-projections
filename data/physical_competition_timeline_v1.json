@@ -25,7 +25,7 @@
       "VL-GLOBAL": 36
     }
   },
-  "restricted_output_sha256": "7ffee65badb9bccda030d88e903d1a580332c1bf66233beb8b82488b66408d64",
+  "restricted_output_sha256": "8d194f5f46010a018a393dea63af69086ca7b7bf4b7bdfc9dc809e5300997858",
   "claims": {
     "observation_strictly_precedes_result": true,
     "current_rating_used_as_historical_target": false,
