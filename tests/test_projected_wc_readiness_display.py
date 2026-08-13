@@ -21,6 +21,7 @@ class ProjectedWcReadinessDisplayTest(unittest.TestCase):
                     "wc_projection_score": 1512.4,
                     "wc_projection_score_sd": 104.0,
                     "wc_projection_score_sd_source": "wc_latent_readiness_sd",
+                    "semifinal_probability_central": 0.1234,
                     "direct_senior_open_wc_plus_competitions": 0,
                 }
             ]
@@ -31,20 +32,22 @@ class ProjectedWcReadinessDisplayTest(unittest.TestCase):
             self.athlete, self.projection, {"verified": True}
         )
         self.assertTrue(displayed["available"])
-        self.assertEqual(displayed["value"], "1512")
+        self.assertEqual(displayed["value"], "12.3%")
         self.assertNotEqual(displayed["value"], "1943")
-        self.assertIn("latent-state SD 104", displayed["caption"])
-        self.assertIn("not a calibrated confidence or predictive interval", displayed["caption"])
-        self.assertIn("not point-for-point comparable", displayed["caption"])
+        self.assertIn("Latent-state SD 104", displayed["caption"])
+        self.assertIn("P(semifinal | starts in the reference WC field)", displayed["caption"])
+        self.assertIn("not a calibrated confidence or predictive", displayed["caption"])
+        self.assertIn("not access/selection probability", displayed["caption"])
+        self.assertIn("not a conservative lower bound", displayed["caption"])
         self.assertIn("No direct Senior/Open WC+ start", displayed["caption"])
-        self.assertIn("never enters its leaderboard", displayed["caption"])
+        self.assertIn("never enters the direct-WC leaderboard", displayed["caption"])
 
     def test_unverified_artifact_never_uses_legacy_wc_value(self) -> None:
         displayed = projected_wc_readiness_display(
             self.athlete, self.projection, {"verified": False}
         )
         self.assertFalse(displayed["available"])
-        self.assertEqual(displayed["value"], "Not yet calibrated")
+        self.assertEqual(displayed["value"], "Unavailable")
         self.assertNotIn("1943", displayed["caption"])
         self.assertIn("no legacy WC value is substituted", displayed["caption"])
 
