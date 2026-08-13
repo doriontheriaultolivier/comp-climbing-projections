@@ -89,7 +89,8 @@ def build_record(
     problem: dict[str, object], *, confidence: str, pre_zone_direction: str,
     post_zone_direction: str, core_values: dict[str, tuple[int, int]],
     detailed_values: dict[str, tuple[int, int]], optional_tags_completed: bool,
-    image_name: str = "", image_bytes: bytes = b"", frame: dict[str, object] | None = None,
+    reviewer_code: str = "", image_name: str = "", image_bytes: bytes = b"",
+    frame: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Create a schema-v4 record bound to a governed boulder and its segments."""
     number = int(problem["boulder_number"])
@@ -109,6 +110,7 @@ def build_record(
         "boulder_count_source": "data/boulder_problem_inventory.csv.gz",
         "pre_zone_direction": pre_zone_direction, "post_zone_direction": post_zone_direction,
         "optional_tags_completed": optional_tags_completed, "confidence": confidence,
+        "contributor": reviewer_code,
         "image_name": image_name,
         "image_sha256": hashlib.sha256(image_bytes).hexdigest() if image_bytes else "",
         "image_in_bundle": "" if not image_bytes else "uploaded_to_shared_backend",
@@ -383,27 +385,61 @@ def load_shared_records(url: str) -> tuple[list[dict[str, object]], str]:
         return [], f"Shared tag list is unavailable: {exc}"
 
 
-def reviewed_boulder_uids(records: list[dict[str, object]]) -> set[str]:
-    """Return exact governed Boulder identities with a saved review."""
+def normalize_reviewer_code(value: object) -> str:
+    code = re.sub(r"[^A-Za-z0-9_-]", "", str(value).strip())[:24]
+    if not code:
+        raise ValueError("Enter a pseudonymous reviewer code")
+    return code
+
+
+def reviewed_boulder_uids(
+    records: list[dict[str, object]], reviewer_code: str | None = None,
+) -> set[str]:
+    """Return exact Boulder identities reviewed by this reviewer or anyone."""
 
     return {
         str(record["boulder_uid"])
         for record in records
         if isinstance(record, dict) and str(record.get("boulder_uid", "")).strip()
+        and (
+            reviewer_code is None
+            or str(record.get("contributor", "")).strip() == reviewer_code
+        )
     }
+
+
+def independent_review_coverage(records: list[dict[str, object]]) -> pd.DataFrame:
+    """Count distinct declared reviewers without treating duplicates as independent."""
+
+    rows = pd.DataFrame([
+        {
+            "boulder_uid": str(record.get("boulder_uid", "")).strip(),
+            "reviewer_code": str(record.get("contributor", "")).strip(),
+        }
+        for record in records
+        if isinstance(record, dict)
+        and str(record.get("boulder_uid", "")).strip()
+        and str(record.get("contributor", "")).strip()
+    ])
+    if rows.empty:
+        return pd.DataFrame(columns=["boulder_uid", "independent_reviewers"])
+    return rows.groupby("boulder_uid", as_index=False).agg(
+        independent_reviewers=("reviewer_code", "nunique")
+    )
 
 
 def pending_review_inventory(
     inventory: pd.DataFrame,
     records: list[dict[str, object]],
     *,
+    reviewer_code: str | None = None,
     include_completed: bool = False,
 ) -> pd.DataFrame:
     """Keep governed ordering while hiding exact completed tasks by default."""
 
     if include_completed or inventory.empty or "boulder_uid" not in inventory:
         return inventory.copy()
-    completed = reviewed_boulder_uids(records)
+    completed = reviewed_boulder_uids(records, reviewer_code=reviewer_code)
     return inventory.loc[~inventory["boulder_uid"].astype(str).isin(completed)].copy()
 
 
@@ -441,6 +477,26 @@ def main() -> None:
     session_records = st.session_state.get("style_tag_records", [])
     all_records = [*shared, *session_records]
     completed_uids = reviewed_boulder_uids(all_records)
+    reviewer_code_raw = st.text_input(
+        "Reviewer code",
+        value=str(st.session_state.get("style_tag_reviewer_code", "")),
+        max_chars=24,
+        help=(
+            "Use a stable pseudonym, not your name or email. A boulder is hidden only "
+            "after this reviewer has tagged it, allowing independent second reviews."
+        ),
+    )
+    try:
+        reviewer_code = normalize_reviewer_code(reviewer_code_raw)
+        st.session_state["style_tag_reviewer_code"] = reviewer_code
+    except ValueError:
+        reviewer_code = ""
+        st.warning("Enter a pseudonymous reviewer code to start or save a review.")
+    agreement = independent_review_coverage(all_records)
+    independently_double_reviewed = int(
+        agreement["independent_reviewers"].ge(2).sum()
+        if not agreement.empty else 0
+    )
     prioritized = inventory.loc[inventory["priority_rank"].notna()]
     reviewed_prioritized = int(
         prioritized["boulder_uid"].astype(str).isin(completed_uids).sum()
@@ -478,11 +534,17 @@ def main() -> None:
     review_inventory = pending_review_inventory(
         inventory,
         all_records,
+        reviewer_code=reviewer_code or None,
         include_completed=include_completed,
     )
     st.caption(
         f"Progress: {reviewed_prioritized:,}/{len(prioritized):,} prioritized governed "
         "tasks have a saved review. The form starts at the highest-priority unreviewed task."
+    )
+    st.caption(
+        f"Independent-review coverage: {independently_double_reviewed:,} boulders have "
+        "reviews from at least two distinct declared reviewer codes. Duplicate submissions "
+        "from one code do not count. Agreement is not estimated until this count is nonzero."
     )
     flash = st.session_state.pop("style_tag_flash", None)
     if isinstance(flash, tuple) and len(flash) == 2:
@@ -582,10 +644,12 @@ def main() -> None:
             [None, *matched_frames],
             format_func=lambda frame: "No receipt provenance" if frame is None else f"{frame['candidate_id']} · {frame['frame_seconds']}s",
         )
-        submitted = st.form_submit_button("Save style-tag proposal", type="primary")
+        submitted = st.form_submit_button(
+            "Save style-tag proposal", type="primary", disabled=not reviewer_code
+        )
     if submitted:
         image_bytes = image.getvalue() if image else b""
-        record = build_record(selected_problem, confidence=confidence, pre_zone_direction=pre_direction, post_zone_direction=post_direction, core_values=core_values, detailed_values=detailed_values, optional_tags_completed=optional_tags_completed, image_name=image.name if image else "", image_bytes=image_bytes, frame=selected_frame)
+        record = build_record(selected_problem, confidence=confidence, pre_zone_direction=pre_direction, post_zone_direction=post_direction, core_values=core_values, detailed_values=detailed_values, optional_tags_completed=optional_tags_completed, reviewer_code=reviewer_code, image_name=image.name if image else "", image_bytes=image_bytes, frame=selected_frame)
         st.session_state.setdefault("style_tag_records", []).append(record)
         url = backend_url()
         if url:
