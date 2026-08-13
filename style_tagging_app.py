@@ -428,6 +428,54 @@ def independent_review_coverage(records: list[dict[str, object]]) -> pd.DataFram
     )
 
 
+def independent_core_tag_agreement(records: list[dict[str, object]]) -> pd.DataFrame:
+    """Describe core-tag disagreement where at least two reviewers exist.
+
+    If a reviewer saved multiple records for one Boulder, only their latest
+    timestamped record is retained. This table is descriptive and reports its
+    actual paired Boulder count; it never turns that count into a pass/fail gate.
+    """
+
+    fields = [
+        f"{segment}_{field}"
+        for segment in ("pre_zone", "post_zone")
+        for field in CORE_TAG_LABELS
+    ]
+    rows = pd.DataFrame([
+        record for record in records
+        if isinstance(record, dict)
+        and str(record.get("boulder_uid", "")).strip()
+        and str(record.get("contributor", "")).strip()
+        and all(field in record for field in fields)
+    ])
+    if rows.empty:
+        return pd.DataFrame()
+    rows["submitted_at_utc"] = pd.to_datetime(
+        rows.get("submitted_at_utc"), errors="coerce", utc=True
+    )
+    rows = rows.sort_values("submitted_at_utc", kind="stable").drop_duplicates(
+        ["boulder_uid", "contributor"], keep="last"
+    )
+    paired = rows.loc[
+        rows.groupby("boulder_uid")["contributor"].transform("nunique").ge(2)
+    ].copy()
+    if paired.empty:
+        return pd.DataFrame()
+    output: list[dict[str, object]] = []
+    for field in fields:
+        values = pd.to_numeric(paired[field], errors="coerce")
+        by_boulder = paired.assign(_value=values).groupby("boulder_uid")["_value"]
+        ranges = by_boulder.max() - by_boulder.min()
+        output.append({
+            "Core tag": field,
+            "Double-reviewed boulders": int(ranges.notna().sum()),
+            "Exact agreement": float(ranges.eq(0).mean()),
+            "Mean reviewer range (0-3)": float(ranges.mean()),
+            "Maximum reviewer range (0-3)": float(ranges.max()),
+        })
+    return pd.DataFrame(output)
+
+
 def pending_review_inventory(
     inventory: pd.DataFrame,
     records: list[dict[str, object]],
@@ -546,6 +594,13 @@ def main() -> None:
         "reviews from at least two distinct declared reviewer codes. Duplicate submissions "
         "from one code do not count. Agreement is not estimated until this count is nonzero."
     )
+    agreement_table = independent_core_tag_agreement(all_records)
+    if not agreement_table.empty:
+        st.dataframe(agreement_table, hide_index=True, width="stretch")
+        st.caption(
+            "Agreement uses each reviewer's latest record per Boulder and reports the "
+            "actual double-reviewed count. It is descriptive, not a model-release gate."
+        )
     flash = st.session_state.pop("style_tag_flash", None)
     if isinstance(flash, tuple) and len(flash) == 2:
         (st.success if flash[0] == "success" else st.warning)(str(flash[1]))

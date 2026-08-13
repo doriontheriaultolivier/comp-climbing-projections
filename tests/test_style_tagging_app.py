@@ -141,6 +141,31 @@ class StyleTaggingAppTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             module.normalize_reviewer_code(" !!! ")
 
+    def test_core_tag_agreement_uses_latest_independent_review(self) -> None:
+        base = {
+            "boulder_uid": "round-a-b1",
+            **{
+                f"{segment}_{field}": 1
+                for segment in ("pre_zone", "post_zone")
+                for field in module.CORE_TAG_LABELS
+            },
+        }
+        records = [
+            {**base, "contributor": "a", "submitted_at_utc": "2026-01-01T00:00:00Z",
+             "pre_zone_physical_0_3": 3},
+            {**base, "contributor": "a", "submitted_at_utc": "2026-01-02T00:00:00Z"},
+            {**base, "contributor": "b", "submitted_at_utc": "2026-01-01T00:00:00Z",
+             "post_zone_coordination_0_3": 2},
+        ]
+        result = module.independent_core_tag_agreement(records)
+        physical = result.loc[result["Core tag"].eq("pre_zone_physical_0_3")].iloc[0]
+        coordination = result.loc[
+            result["Core tag"].eq("post_zone_coordination_0_3")
+        ].iloc[0]
+        self.assertEqual(physical["Exact agreement"], 1.0)
+        self.assertEqual(coordination["Mean reviewer range (0-3)"], 1.0)
+        self.assertEqual(int(coordination["Double-reviewed boulders"]), 1)
+
     def test_exact_round_priority_is_attached_without_excluding_other_items(self) -> None:
         inventory = pd.DataFrame([
             {
