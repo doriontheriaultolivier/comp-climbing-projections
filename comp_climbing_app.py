@@ -21,7 +21,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from release_identity_senior_wc import senior_wc_direct_evidence_mask
+from release_identity_senior_wc import (
+    load_reviewed_identity_overrides,
+    senior_wc_direct_evidence_mask,
+    suppress_reviewed_alias_profile,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -973,10 +977,15 @@ def read_data() -> dict[str, object]:
     safe_athletes, wc_evidence_audit = withhold_legacy_wc_without_direct_evidence(
         safe_athletes, safe_history
     )
+    overrides = load_reviewed_identity_overrides(DATA / "reviewed_identity_overrides.csv")
+    safe_athletes, alias_audit = suppress_reviewed_alias_profile(
+        safe_athletes, overrides
+    )
     output["athletes"] = safe_athletes
     output["history"] = safe_history
     output["fixture_quarantine"] = fixture_audit
     output["legacy_wc_evidence_audit"] = wc_evidence_audit
+    output["reviewed_identity_alias_audit"] = alias_audit
     return output
 
 
