@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -90,6 +91,34 @@ class StyleTaggingAppTest(unittest.TestCase):
     def test_shared_record_endpoint_preserves_existing_query_parameters(self) -> None:
         self.assertEqual(module.shared_records_url("https://example.test/exec", 25), "https://example.test/exec?action=list&limit=25")
         self.assertEqual(module.shared_records_url("https://example.test/exec?token=public", 25), "https://example.test/exec?token=public&action=list&limit=25")
+
+    def test_shared_loader_requests_full_independent_review_capacity(self) -> None:
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"ok":true,"records":[]}'
+
+        requested: list[str] = []
+
+        def open_stub(url: str, timeout: int):
+            requested.append(url)
+            self.assertEqual(timeout, 15)
+            return Response()
+
+        module.load_shared_records.clear()
+        with patch.object(module.urlrequest, "urlopen", side_effect=open_stub):
+            records, error = module.load_shared_records("https://example.test/exec")
+        self.assertEqual(records, [])
+        self.assertEqual(error, "")
+        self.assertEqual(
+            requested,
+            ["https://example.test/exec?action=list&limit=3000"],
+        )
 
     def test_completed_boulders_are_hidden_without_reordering_pending_work(self) -> None:
         inventory = pd.DataFrame(
