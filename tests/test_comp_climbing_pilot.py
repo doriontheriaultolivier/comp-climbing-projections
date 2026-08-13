@@ -27,6 +27,9 @@ from comp_climbing_app import (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class CanadianPilotProjectionTests(unittest.TestCase):
     def test_legacy_wc_is_withheld_when_only_youth_world_evidence_exists(self) -> None:
         athletes = pd.DataFrame({
@@ -100,7 +103,9 @@ class CanadianPilotProjectionTests(unittest.TestCase):
         self.assertEqual(int(athletes["WR-ELO"].notna().sum()), 0)
 
     def test_world_ranking_view_uses_current_wc_plus_rating_family(self) -> None:
-        app = AppTest.from_file("comp_climbing_app.py", default_timeout=30).run()
+        app = AppTest.from_file(
+            ROOT / "comp_climbing_app.py", default_timeout=30
+        ).run()
         app.segmented_control[2].set_value("WR Pool").run()
         self.assertEqual(len(app.exception), 0)
         rating_control = next(
