@@ -1,0 +1,63 @@
+{
+  "chronology": {
+    "2024": "development",
+    "2025": "untouched_validation",
+    "2026": "descriptive_only"
+  },
+  "models": {
+    "baseline": "identity_correct_v4_scale400",
+    "challenger": "additive_tanh_c0.5_a200"
+  },
+  "results": [
+    {
+      "baseline_pair_brier": 0.20843204036066992,
+      "baseline_pair_log_loss": 0.6210713136258419,
+      "baseline_placement_rps": 0.15418513648039223,
+      "canonical_pairs": 1329185,
+      "challenger_pair_brier": 0.20686791048984002,
+      "challenger_pair_log_loss": 0.6176158565827204,
+      "challenger_placement_rps": 0.15312500537695375,
+      "competitions": 613,
+      "role": "untouched_validation",
+      "year": 2025
+    },
+    {
+      "baseline_pair_brier": 0.19656499068745298,
+      "baseline_pair_log_loss": 0.5939691545173165,
+      "baseline_placement_rps": 0.14586000770282628,
+      "canonical_pairs": 1263357,
+      "challenger_pair_brier": 0.19544680062702469,
+      "challenger_pair_log_loss": 0.5916873434111082,
+      "challenger_placement_rps": 0.14508636038230738,
+      "competitions": 393,
+      "role": "descriptive_only",
+      "year": 2026
+    }
+  ],
+  "schema": "current-wc-v4-release-validation-status-v1",
+  "source_bindings": {
+    "cec_harm_audit_receipt_sha256": "e893a887b4ce88ab61a3ae06e27369b8a0faec5dae0a1399def19060af5e9170",
+    "challenger_decision_receipt_sha256": "07caf1a8536e5a2ac497fba118d8094d5d4bc314aa99a3ecf3b948e77e0961be",
+    "native_baseline_audit_receipt_sha256": "b21297065b8be539a3042496da0edac3f903d31c768e166a9daf0ca22203cbf1",
+    "shadow_receipt_sha256": "d79ee1f136657e82afe8734c18521262c18be8c5504ab0b4ee01eff86662608a",
+    "v4_full_replay_manifest_sha256": "8ca620bc987bb19849bc2c3d19f67ce565161c92a94019c5dceb973e1c4cc3de",
+    "v4_independent_verification_sha256": "9a64cfe881503c1c4838658b45c42cec2fb62877916bf724c978d4dacb818927"
+  },
+  "status": "RESEARCH_CHALLENGER_NOT_PROMOTED",
+  "validation_guard": {
+    "baseline_pair_log_loss": 0.6333937506868687,
+    "challenger_pair_log_loss": 0.6431393227276286,
+    "competitions": 46,
+    "diagnosis": "overconfidence_amplification_concentrated_in_youth_and_large_rating_gaps_not_duplicate_or_identity_inflation",
+    "pair_log_loss_delta": 0.009745572040759935,
+    "probability_of_harm": 1.0,
+    "scope": "CEC_vs_CEC",
+    "year": 2025
+  },
+  "withholding": {
+    "applied_to_current_athlete_cards": false,
+    "applied_to_target_event_probabilities": false,
+    "current_intervals_published": false,
+    "current_zero_or_one_wc_start_central_values_published": false
+  }
+}
