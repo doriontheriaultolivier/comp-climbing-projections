@@ -296,8 +296,8 @@ def load_current_wc_model_status(
         if withholding != {
             "applied_to_current_athlete_cards": False,
             "applied_to_target_event_probabilities": False,
-            "current_zero_or_one_wc_start_central_values_published": False,
-            "current_intervals_published": False,
+            "v4_zero_or_one_wc_start_central_values_published": False,
+            "v4_intervals_published": False,
         }:
             return None
         bindings = value["source_bindings"]
@@ -2364,8 +2364,9 @@ def render_current_wc_model_status() -> None:
             "- The independently replayed V4 identity baseline remains the research reference; "
             "the challenger is a shadow comparison only.\n"
             "- Neither model changes current athlete cards or target-event probabilities here.\n"
-            "- Current central WC projections for athletes with zero or one prior Senior/Open "
-            "WC start remain withheld; no new uncertainty intervals are published.\n"
+            "- This V4 successor publishes no central values for athletes with zero or one "
+            "prior Senior/Open WC start and no new uncertainty intervals. The separate older "
+            "pilot may still show clearly labelled conservative graph-transfer estimates.\n"
             "- The next test is prospective CEC context capture with competition-cluster "
             "validation, not fitting a correction to the failed 2025 subgroup."
         )

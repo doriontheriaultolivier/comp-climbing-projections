@@ -57,7 +57,7 @@
   "withholding": {
     "applied_to_current_athlete_cards": false,
     "applied_to_target_event_probabilities": false,
-    "current_intervals_published": false,
-    "current_zero_or_one_wc_start_central_values_published": false
+    "v4_intervals_published": false,
+    "v4_zero_or_one_wc_start_central_values_published": false
   }
 }

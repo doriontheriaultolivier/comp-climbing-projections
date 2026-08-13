@@ -23,7 +23,7 @@ def test_status_loads_verified_baseline_and_unpromoted_challenger() -> None:
     assert value["status"] == "RESEARCH_CHALLENGER_NOT_PROMOTED"
     assert value["validation_guard"]["scope"] == "CEC_vs_CEC"
     assert value["validation_guard"]["probability_of_harm"] == 1.0
-    assert value["withholding"]["current_zero_or_one_wc_start_central_values_published"] is False
+    assert value["withholding"]["v4_zero_or_one_wc_start_central_values_published"] is False
 
 
 def test_status_loader_rejects_promotion_or_hidden_harm(tmp_path: Path) -> None:
@@ -48,5 +48,6 @@ def test_status_render_states_gain_harm_and_withholding() -> None:
     assert "Current probability-model validation" in text
     assert "not promoted" in text.lower()
     assert "CEC-vs-CEC" in text
-    assert "zero or one prior" in text
+    assert "This V4 successor publishes no central values" in text
+    assert "older pilot" in text
     assert "prospective CEC context" in text
