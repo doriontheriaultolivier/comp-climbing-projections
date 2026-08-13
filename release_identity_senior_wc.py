@@ -91,3 +91,27 @@ def identity_rebuild_status(
         "requires_producer_rebuild": bool(alias_rows),
         "runtime_merge_performed": False,
     }
+
+
+def suppress_reviewed_alias_profile(
+    athletes: pd.DataFrame,
+    overrides: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Hide the one reviewed superseded profile without merging rating history."""
+
+    if len(overrides) != 1:
+        raise ValueError("reviewed override ledger must be validated before suppression")
+    ids = athletes.get("global_id", pd.Series("", index=athletes.index)).astype(str)
+    alias_mask = ids.eq(REVIEWED_ALIAS_GLOBAL_ID)
+    canonical_count = int(ids.eq(REVIEWED_CANONICAL_GLOBAL_ID).sum())
+    alias_count = int(alias_mask.sum())
+    if canonical_count != 1 or alias_count != 1:
+        raise ValueError("reviewed canonical/alias profile cardinality changed")
+    return athletes.loc[~alias_mask].copy(), {
+        "reviewed_alias_global_id": REVIEWED_ALIAS_GLOBAL_ID,
+        "reviewed_canonical_global_id": REVIEWED_CANONICAL_GLOBAL_ID,
+        "suppressed_profile_count": alias_count,
+        "history_rows_changed": 0,
+        "ratings_merged": False,
+        "requires_producer_rebuild": True,
+    }

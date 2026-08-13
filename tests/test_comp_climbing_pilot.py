@@ -75,6 +75,19 @@ class CanadianPilotProjectionTests(unittest.TestCase):
         self.assertTrue(rows["WC+-ELO evidence"].isna().all())
         self.assertTrue(rows["direct_senior_wc_competitions"].eq(0).all())
 
+    def test_public_read_hides_only_reviewed_amari_alias(self) -> None:
+        app_module.read_data.clear()
+        data = app_module.read_data()
+        athletes = data["athletes"]
+        history = data["history"]
+        self.assertEqual(int(athletes["global_id"].eq("IFSC:14843").sum()), 1)
+        self.assertEqual(int(athletes["global_id"].eq("IFSC:18545").sum()), 0)
+        self.assertEqual(int(history["global_id"].eq("IFSC:18545").sum()), 2)
+        audit = data["reviewed_identity_alias_audit"]
+        self.assertEqual(audit["suppressed_profile_count"], 1)
+        self.assertEqual(audit["history_rows_changed"], 0)
+        self.assertFalse(audit["ratings_merged"])
+
     def test_current_bundle_exposes_wc_plus_not_nonexistent_wr_elo(self) -> None:
         athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
         self.assertIn("WC+-ELO", RATING_ORDER)

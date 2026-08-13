@@ -10,6 +10,7 @@ from release_identity_senior_wc import (
     identity_rebuild_status,
     load_reviewed_identity_overrides,
     senior_wc_direct_evidence_mask,
+    suppress_reviewed_alias_profile,
 )
 from scripts.audit_release_identity_senior_wc_v1 import verify
 from scripts.audit_release_identity_senior_wc_v1 import canonical_text_sha256
@@ -19,6 +20,24 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseIdentitySeniorWcTests(unittest.TestCase):
+    def test_reviewed_alias_is_hidden_without_merging_or_dropping_history(self) -> None:
+        athletes = pd.DataFrame(
+            {
+                "global_id": ["IFSC:14843", "IFSC:18545", "IFSC:123"],
+                "rating": [2009.0, 1744.0, 1900.0],
+            }
+        )
+        overrides = load_reviewed_identity_overrides(
+            ROOT / "data" / "reviewed_identity_overrides.csv"
+        )
+        safe, audit = suppress_reviewed_alias_profile(athletes, overrides)
+        self.assertEqual(safe["global_id"].tolist(), ["IFSC:14843", "IFSC:123"])
+        self.assertEqual(float(safe.iloc[0]["rating"]), 2009.0)
+        self.assertEqual(audit["suppressed_profile_count"], 1)
+        self.assertEqual(audit["history_rows_changed"], 0)
+        self.assertFalse(audit["ratings_merged"])
+        self.assertTrue(audit["requires_producer_rebuild"])
+
     def test_override_hash_is_portable_across_line_endings(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
             root = Path(temporary)
