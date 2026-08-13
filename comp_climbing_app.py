@@ -811,10 +811,10 @@ def withhold_legacy_wc_without_direct_evidence(
     return safe, audit
 
 
-def load_current_wc_projection_artifact(
+def _load_retired_v3_current_wc_projection_artifact(
     data_dir: Path = DATA,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    """Load the current pilot only when its clean replay contract is intact."""
+    """Verify the retired V3 pilot without authorizing it for display."""
 
     csv_path = data_dir / "canadian_current_wc_projection_v3_youth_world_complete.csv"
     metadata_path = (
@@ -1076,11 +1076,79 @@ def load_current_wc_projection_artifact(
         return pd.DataFrame(), {"verified": False, "reason": str(error)}
 
 
+def load_current_wc_projection_artifact(
+    data_dir: Path = DATA,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Fail closed while the independently replayed V4 release gate is withheld."""
+
+    withheld = pd.DataFrame(
+        columns=["athlete_id", "pool", "projection_status"]
+    )
+    _, legacy = _load_retired_v3_current_wc_projection_artifact(data_dir)
+    gate_path = data_dir / "canadian_current_wc_projection_v4_release_gate.json"
+    if not gate_path.is_file():
+        return withheld, {
+            "verified": False,
+            "release_status": "withheld_missing_v4_release_gate",
+            "reason": "The V4 release-gate record is missing; V3 remains retired.",
+            "retired_v3_artifact_verified": legacy.get("verified") is True,
+        }
+    try:
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+        if gate.get("schema") != "canadian-current-wc-projection-v4-release-gate-v1":
+            raise ValueError("unexpected V4 release-gate schema")
+        successor = gate["successor"]
+        claims = gate["claims"]
+        expected = {
+            "manifest_sha256": "8ca620bc987bb19849bc2c3d19f67ce565161c92a94019c5dceb973e1c4cc3de",
+            "independent_verification_receipt_sha256": "9a64cfe881503c1c4838658b45c42cec2fb62877916bf724c978d4dacb818927",
+            "canadian_projection_sha256": "97f151f885f06a2532606f531d9c56dd0ffdfce9601d841449784eac0abb9c49",
+        }
+        for field, value in expected.items():
+            if successor.get(field) != value:
+                raise ValueError(f"V4 release-gate binding mismatch: {field}")
+        if any(
+            claims.get(field) is not expected_value
+            for field, expected_value in (
+                ("independent_full_recomputation", True),
+                ("app_integration_authorized", False),
+                ("production_rating", False),
+                ("all_numeric_intervals_withheld", True),
+                ("low_evidence_numeric_publication_authorized", False),
+            )
+        ):
+            raise ValueError("V4 release claims do not remain fail-closed")
+        if int(successor.get("zero_or_one_start_rows_withheld", -1)) != 172:
+            raise ValueError("V4 low-evidence withholding count changed")
+        if int(successor.get("established_research_rows", -1)) != 83:
+            raise ValueError("V4 established-row count changed")
+        return withheld, {
+            "verified": False,
+            "release_status": "withheld_v4_not_authorized_for_app_integration",
+            "reason": (
+                "The identity-correct V4 replay independently reproduced, but its "
+                "release contract does not authorize app integration. Numeric output "
+                "is withheld for 0/1 prior WC starts, all intervals are withheld, and "
+                "the older V3 pilot is retired rather than shown as current."
+            ),
+            "retired_v3_artifact_verified": legacy.get("verified") is True,
+            "successor": successor,
+            "claims": claims,
+        }
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as error:
+        return withheld, {
+            "verified": False,
+            "release_status": "withheld_invalid_v4_release_gate",
+            "reason": str(error),
+            "retired_v3_artifact_verified": legacy.get("verified") is True,
+        }
+
+
 @st.cache_data(show_spinner=False, ttl=900, max_entries=2)
 def read_data() -> dict[str, object]:
     # Bump this value whenever a byte-bound data artifact is replaced. Streamlit
     # otherwise may retain the previous verification result until the TTL ends.
-    projection_cache_release = "v3-youth-world-complete-sealed-bytes"
+    projection_cache_release = "v4-release-gate-v1-v3-retired"
     files = {
         "athletes": ("boulder_overview_athletes.parquet", "parquet"),
         "history": ("boulder_overview_history.parquet", "parquet"),
@@ -1829,11 +1897,9 @@ def render_canadian_projection_pilot(
         "benchmark for Canadian climbers."
     )
     st.info(
-        "Representative-2026-field estimate, conditional on starting. The score "
-        "uses all within-contest pairwise orderings, a 100-day form component and "
-        "WC-specific transfer. It is not an attendance, selection, injury or "
-        "route-style-specific forecast; a known entry list and route set should "
-        "replace the representative field for named-event guidance.",
+        "No current numeric WC benchmark is released. The older V3 scenario is "
+        "retired, and the independently replayed V4 successor remains research-only "
+        "until its calibration and app-integration gate passes.",
         icon="ℹ️",
     )
     focus = selected_rows(athletes, selected).copy()
@@ -1849,10 +1915,15 @@ def render_canadian_projection_pilot(
             if projection_metadata
             else "projection metadata is missing"
         )
-        st.error(
-            "The fixture-clean current projection failed its artifact check: "
-            f"{reason}. The legacy probability curves are intentionally not used."
-        )
+        if str((projection_metadata or {}).get("release_status", "")).startswith(
+            "withheld_v4"
+        ):
+            st.warning(reason)
+        else:
+            st.error(
+                "The fixture-clean current projection failed its artifact check: "
+                f"{reason}. The legacy probability curves are intentionally not used."
+            )
         return
     if current_projection.empty:
         st.error(
@@ -2908,19 +2979,12 @@ def projected_wc_readiness_display(
         or not np.isfinite(direct)
     ):
         return unavailable
-    if direct <= 0:
-        evidence = (
-            "No direct Senior/Open WC+ start; counterfactual graph-transfer estimate. "
-            "Locked 2026 zero-prior class: 0/78 reached a semifinal while the mean "
-            "forecast was 5.4%"
-        )
-    elif direct < 2:
-        evidence = (
-            "1 direct Senior/Open WC+ competition. Locked 2026 one-prior class: 6/58 "
-            "reached a semifinal while the mean forecast was 13.7%"
-        )
-    else:
-        evidence = f"{int(direct)} direct Senior/Open WC+ competitions; established 2+ evidence class"
+    if direct < 2:
+        return unavailable
+    evidence = (
+        f"{int(direct)} direct Senior/Open WC+ competitions; "
+        "established 2+ evidence class"
+    )
     return {
         "available": True,
         "value": f"{probability:.1%}",
