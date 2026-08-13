@@ -53,6 +53,7 @@ class StyleTaggingAppTest(unittest.TestCase):
             )
         )
         self.assertIn("Save style-tag proposal", [button.label for button in app.button])
+        self.assertEqual(app.text_input[0].label, "Reviewer code")
         self.assertTrue(str(app.selectbox[3].value).startswith("Coaching 1 ·"))
         self.assertEqual(app.radio[0].label, "Review order")
         self.assertEqual(app.radio[0].value, "Coaching evidence unlocked")
@@ -70,13 +71,14 @@ class StyleTaggingAppTest(unittest.TestCase):
             module.canonical_boulder_label("B5")
 
     def test_builds_a_schema_v4_record_bound_to_a_problem(self) -> None:
-        record = module.build_record(PROBLEM, confidence="High", pre_zone_direction="Up", post_zone_direction="Diagonal", core_values={field: (2, 1) for field in module.CORE_TAG_LABELS}, detailed_values={"crimp_edge_0_3": (3, 2)}, optional_tags_completed=True)
+        record = module.build_record(PROBLEM, confidence="High", pre_zone_direction="Up", post_zone_direction="Diagonal", core_values={field: (2, 1) for field in module.CORE_TAG_LABELS}, detailed_values={"crimp_edge_0_3": (3, 2)}, optional_tags_completed=True, reviewer_code="reviewer-1")
         schema = json.loads((Path(__file__).parents[1] / "schemas" / "boulder_style_tag_schema_v4.json").read_text())
         self.assertEqual(record["schema_version"], "4.0")
         self.assertTrue(set(schema["required"]).issubset(record))
         self.assertEqual(record["boulder"], "B2")
         self.assertEqual(record["pre_zone_crimp_edge_0_3"], 3)
         self.assertEqual(record["post_zone_crimp_edge_0_3"], 2)
+        self.assertEqual(record["contributor"], "reviewer-1")
 
     def test_frame_receipt_matches_exact_round_and_boulder_only(self) -> None:
         receipt = {"frames": [
@@ -111,6 +113,61 @@ class StyleTaggingAppTest(unittest.TestCase):
         )
         self.assertEqual(complete["boulder_uid"].tolist(), inventory["boulder_uid"].tolist())
         self.assertEqual(module.reviewed_boulder_uids(records), {"round-a-b1"})
+
+    def test_reviewer_specific_completion_allows_independent_second_review(self) -> None:
+        inventory = pd.DataFrame([
+            {"boulder_uid": "round-a-b1", "priority_rank": 1},
+            {"boulder_uid": "round-a-b2", "priority_rank": 2},
+        ])
+        records = [
+            {"boulder_uid": "round-a-b1", "contributor": "reviewer-a"},
+            {"boulder_uid": "round-a-b1", "contributor": "reviewer-a"},
+            {"boulder_uid": "round-a-b1", "contributor": "reviewer-b"},
+        ]
+        pending_a = module.pending_review_inventory(
+            inventory, records, reviewer_code="reviewer-a"
+        )
+        pending_c = module.pending_review_inventory(
+            inventory, records, reviewer_code="reviewer-c"
+        )
+        self.assertEqual(pending_a["boulder_uid"].tolist(), ["round-a-b2"])
+        self.assertEqual(pending_c["boulder_uid"].tolist(), ["round-a-b1", "round-a-b2"])
+        coverage = module.independent_review_coverage(records)
+        self.assertEqual(int(coverage.iloc[0]["independent_reviewers"]), 2)
+
+    def test_reviewer_code_is_pseudonymous_and_bounded(self) -> None:
+        self.assertEqual(module.normalize_reviewer_code(" reviewer_01 "), "reviewer_01")
+        with self.assertRaises(ValueError):
+            module.normalize_reviewer_code(" !!! ")
+        with self.assertRaises(ValueError):
+            module.normalize_reviewer_code("ab@example.com")
+        with self.assertRaises(ValueError):
+            module.normalize_reviewer_code("ab")
+
+    def test_core_tag_agreement_uses_latest_independent_review(self) -> None:
+        base = {
+            "boulder_uid": "round-a-b1",
+            **{
+                f"{segment}_{field}": 1
+                for segment in ("pre_zone", "post_zone")
+                for field in module.CORE_TAG_LABELS
+            },
+        }
+        records = [
+            {**base, "contributor": "a", "submitted_at_utc": "2026-01-01T00:00:00Z",
+             "pre_zone_physical_0_3": 3},
+            {**base, "contributor": "a", "submitted_at_utc": "2026-01-02T00:00:00Z"},
+            {**base, "contributor": "b", "submitted_at_utc": "2026-01-01T00:00:00Z",
+             "post_zone_coordination_0_3": 2},
+        ]
+        result = module.independent_core_tag_agreement(records)
+        physical = result.loc[result["Core tag"].eq("pre_zone_physical_0_3")].iloc[0]
+        coordination = result.loc[
+            result["Core tag"].eq("post_zone_coordination_0_3")
+        ].iloc[0]
+        self.assertEqual(physical["Exact agreement"], 1.0)
+        self.assertEqual(coordination["Mean reviewer range (0-3)"], 1.0)
+        self.assertEqual(int(coordination["Double-reviewed boulders"]), 1)
 
     def test_exact_round_priority_is_attached_without_excluding_other_items(self) -> None:
         inventory = pd.DataFrame([
