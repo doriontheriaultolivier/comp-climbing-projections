@@ -1,0 +1,26 @@
+{
+  "schema": "physical-board-coaching-slice-gemini-review-public-v1",
+  "review_date": "2026-08-13",
+  "model_requested": "gemini-3.1-pro-preview",
+  "model_version": "gemini-3.1-pro-preview",
+  "traffic_type": "ON_DEMAND",
+  "verdict": "ACCEPT",
+  "private_measurements_transmitted": false,
+  "promotion_authority": false,
+  "prompt_sha256": "bbbab40ab268ae0d5f97c09558279022c0a57c27eeb88eac08cecc0b80978919",
+  "request_sha256": "fa34b07abec47f565ac6fb8a25ead42e9eeb9b10370257805137300b026ba19f",
+  "response_sha256": "3c3926f6e388091623d3ecf79b0cbe40f28268944303e19739583bc83f546cf1",
+  "review_sha256": "24a8fd68a8afaf9d4d1ded466be30de384a8f2472b1801bce4bee0b48239c24d",
+  "usage": {
+    "prompt_tokens": 8934,
+    "thoughts_tokens": 7459,
+    "candidate_tokens": 656,
+    "total_tokens": 17049
+  },
+  "adjudication": {
+    "privacy_gate": "accepted",
+    "descriptive_semantics": "accepted",
+    "missing_data_behavior": "accepted",
+    "percentile_display": "resolved_after_review_by_explicit_0_to_100_conversion"
+  }
+}
