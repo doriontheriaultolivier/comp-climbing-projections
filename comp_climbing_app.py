@@ -3448,6 +3448,21 @@ def coaching_profile_rows(
     return profile_rows, priority_rows
 
 
+def tested_athlete_options(profiles: pd.DataFrame) -> dict[str, tuple[str, str]]:
+    """Return stable private explorer labels without changing rating selection."""
+
+    if profiles.empty or not {"athlete_name", "pool"}.issubset(profiles.columns):
+        return {}
+    options: dict[str, tuple[str, str]] = {}
+    rows = profiles[["athlete_name", "pool"]].drop_duplicates().sort_values(
+        ["athlete_name", "pool"], kind="stable"
+    )
+    for row in rows.itertuples(index=False):
+        label = f"{friendly_name(row.athlete_name)} · {row.pool}"
+        options[label] = (str(row.athlete_name), str(row.pool))
+    return options
+
+
 def render_physical_board_coaching_slice(
     athletes: pd.DataFrame,
     selected: list[str],
@@ -3472,7 +3487,25 @@ def render_physical_board_coaching_slice(
                 "None of the selected athletes currently has a confirmed physical-testing "
                 "profile. Missing tests are missing evidence—not low capacity."
             )
-            return
+            options = tested_athlete_options(profiles)
+            labels = ["Choose a tested athlete", *options]
+            choice = st.selectbox(
+                "Explore a tested athlete",
+                labels,
+                help=(
+                    "This changes only the private coaching evidence shown below; it does "
+                    "not change the compared athletes, ratings, or projections."
+                ),
+            )
+            if choice == labels[0]:
+                return
+            athlete_name, pool = options[choice]
+            explorer_focus = pd.DataFrame(
+                [{"athlete_name": athlete_name, "pool": pool}]
+            )
+            profile_rows, priority_rows = coaching_profile_rows(
+                profiles, priorities, explorer_focus
+            )
 
         tabs = st.tabs(
             [friendly_name(row.athlete_name) for row in profile_rows.itertuples(index=False)]
