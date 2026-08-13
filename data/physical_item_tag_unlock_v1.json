@@ -1,0 +1,37 @@
+{
+  "schema": "physical-item-tag-unlock-public-receipt-v1",
+  "status": "HUMAN_TAG_UNLOCK_PRIORITY_READY_NO_TAGS_COMPLETED",
+  "bindings": {
+    "athlete_event_bundles_sha256": "3fb4e21b88a577dc921b85f82cd6371781fb50d7b702aed2aba4a330c0bd4ab3",
+    "item_candidates_sha256": "08709c62df2279be5934f9e2953afa39692c36fb865cd57bf761899893bc13d7"
+  },
+  "coverage": {
+    "boulder_bundles": 2751,
+    "boulder_round_rows": 4805,
+    "candidate_items": 535,
+    "candidate_items_linked_to_coaching_timeline": 535,
+    "covered_round_contexts": 106,
+    "uncovered_round_contexts": 12,
+    "athletes_with_any_candidate": 20,
+    "observations_with_any_candidate": 609
+  },
+  "outputs": {
+    "unlock": {
+      "rows": 535,
+      "sha256": "a272c789fc15137cb026b572c4c627f3b6437985842c4958559d381ba62fc91e"
+    },
+    "gaps": {
+      "rows": 12,
+      "sha256": "ed468c0b9ab8ff5e150ef66eb2586d3b0f10b1c670a7cf8c0fefc96238efb708"
+    }
+  },
+  "claims": {
+    "completed_human_demand_tags": 0,
+    "candidate_status_is_not_a_tag": true,
+    "shared_terrain_evidence_used_as_demand_tag": false,
+    "style_imputed_for_uncovered_events": false,
+    "model_fit": false,
+    "coaching_prescription_authorized": false
+  },
+  "next_gate": "Complete independent human demand tags beginning with high-unlock items, then measure inter-rater agreement."
+}
