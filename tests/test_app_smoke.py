@@ -124,7 +124,7 @@ class AppSmokeTests(unittest.TestCase):
             if "Representative semifinal" in element.value.columns
         ]
         selected = next(table for table in projection_tables if len(table) == 3)
-        all_current = next(table for table in projection_tables if len(table) == 82)
+        all_current = next(table for table in projection_tables if len(table) == 81)
         self.assertEqual(
             selected.columns[2:5].tolist(),
             [
@@ -147,6 +147,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertNotIn("Connected evidence", all_current.columns)
 
         by_name = all_current.set_index("Athlete")
+        self.assertNotIn("Bourbonnais Amari", by_name.index)
         hugo = by_name.loc["DORVAL Hugo"]
         self.assertEqual(hugo["Representative semifinal"], "6.7%")
         self.assertEqual(hugo["Rating-state sensitivity"], "2.6%–16.3%")
