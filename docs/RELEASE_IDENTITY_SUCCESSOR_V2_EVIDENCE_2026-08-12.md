@@ -27,12 +27,39 @@ The first staged result is
 - history artifact: 179,253 rows × 23 columns, SHA-256
   `b51d2df74e04362a07b0099d1bf3c8229a1dec9e6e967283c6534f0e3d9d7379`.
 
+On 2026-08-13, two independent output roots reproduced all three files
+byte-for-byte under the pinned project Python environment:
+
+- manifest: 2,195 bytes, SHA-256
+  `d9766be1020ef7c9899b975c7325ec5ec0039ca7d5d4a7d402dd3a958981c96f`;
+- athlete artifact: 3,875,287 bytes, SHA-256
+  `c5be49ac219a14978f240cc6c1d61699bfbd9fc4737941d00f856d043897b7ec`;
+- history artifact: 16,666,886 bytes, SHA-256
+  `b51d2df74e04362a07b0099d1bf3c8229a1dec9e6e967283c6534f0e3d9d7379`.
+
+The app lifecycle guard was also exercised against a disposable copy with
+these staged bytes. It now accepts exactly the predecessor state (one
+canonical plus one reviewed alias, requiring suppression and rating
+quarantine) or the rebuilt state (one canonical and no alias). Other
+cardinalities still fail closed. In the rebuilt state the new ratings remain
+visible, while the separately frozen current-WC projection row for this
+athlete remains withheld until that projection artifact is rebuilt.
+
 Product checks against copied staged bytes passed for the default view plus
 Global progression, IFSC Pool, WR Pool, and Towards Olympics, with zero
-Streamlit errors/exceptions. The focused release/identity/profile/probability
-suite passed 23 tests.
+Streamlit errors/exceptions. The app smoke suite passed 10 tests plus 13
+subtests. The current-release focused identity/profile/probability suite passed
+28 tests before the staged swap, and the lifecycle transition suite passed 23
+tests after the guard update.
 
-This remains a staged local research successor. Deployment and production
-rating promotion remain false until the second-root byte reproduction, locked
-adult/youth/pathway pair and placement calibration, and release candidate
-acceptance complete.
+This is a whole-model replay, not an Amari-only patch. Relative to the current
+release, only 47 otherwise unique profiles change base Global-ELO, but 2,157
+shared profiles change WC+-ELO and thousands change specialist-family values.
+Those changes therefore require their own chronological predictive validation;
+the reviewed identity decision alone is not promotion evidence.
+
+This remains a staged local research successor. The two-root and app-render
+gates are complete, but deployment and production rating promotion remain false
+until the fresh identity-safe locked adult/youth/pathway pair and placement
+calibration completes. Existing locked predictions still contain both sides of
+the reviewed split and cannot be relabelled into valid successor evidence.

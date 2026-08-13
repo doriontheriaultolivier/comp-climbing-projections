@@ -46,12 +46,21 @@ def quarantine_reviewed_split_identity_outputs(
     alias_history_rows = int(history_ids.eq(REVIEWED_ALIAS_GLOBAL_ID).sum())
     canonical_mask = athlete_ids.eq(REVIEWED_CANONICAL_GLOBAL_ID)
     if alias_history_rows <= 0:
-        return athletes, projection, {
+        safe_projection = projection.copy()
+        projection_rows_withheld = 0
+        if not safe_projection.empty and "athlete_id" in safe_projection:
+            projection_mask = safe_projection["athlete_id"].astype(str).eq(
+                REVIEWED_CANONICAL_GLOBAL_ID
+            )
+            projection_rows_withheld = int(projection_mask.sum())
+            safe_projection = safe_projection.loc[~projection_mask].copy()
+        return athletes, safe_projection, {
             "quarantine_active": False,
             "canonical_profile_count": int(canonical_mask.sum()),
             "alias_history_rows": 0,
             "athlete_rating_values_withheld": 0,
-            "projection_rows_withheld": 0,
+            "projection_rows_withheld": projection_rows_withheld,
+            "projection_rebuild_pending": bool(projection_rows_withheld),
         }
     if int(canonical_mask.sum()) != 1:
         raise ValueError("reviewed split identity canonical profile cardinality changed")
@@ -181,7 +190,14 @@ def suppress_reviewed_alias_profile(
     athletes: pd.DataFrame,
     overrides: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[str, object]]:
-    """Hide the one reviewed superseded profile without merging rating history."""
+    """Hide a reviewed alias, or accept its exact rebuilt terminal state.
+
+    The deployed predecessor contains one canonical and one alias profile, so
+    the alias is suppressed without changing either rating history.  A
+    producer-rebuilt successor contains one canonical and zero alias profiles;
+    that state must pass through unchanged.  Every other cardinality remains a
+    hard error.
+    """
 
     if len(overrides) != 1:
         raise ValueError("reviewed override ledger must be validated before suppression")
@@ -189,8 +205,18 @@ def suppress_reviewed_alias_profile(
     alias_mask = ids.eq(REVIEWED_ALIAS_GLOBAL_ID)
     canonical_count = int(ids.eq(REVIEWED_CANONICAL_GLOBAL_ID).sum())
     alias_count = int(alias_mask.sum())
-    if canonical_count != 1 or alias_count != 1:
+    if canonical_count != 1 or alias_count not in (0, 1):
         raise ValueError("reviewed canonical/alias profile cardinality changed")
+    if alias_count == 0:
+        return athletes.copy(), {
+            "reviewed_alias_global_id": REVIEWED_ALIAS_GLOBAL_ID,
+            "reviewed_canonical_global_id": REVIEWED_CANONICAL_GLOBAL_ID,
+            "suppressed_profile_count": 0,
+            "history_rows_changed": 0,
+            "ratings_merged": False,
+            "requires_producer_rebuild": False,
+            "identity_state": "REVIEWED_REBUILD_RESOLVED",
+        }
     return athletes.loc[~alias_mask].copy(), {
         "reviewed_alias_global_id": REVIEWED_ALIAS_GLOBAL_ID,
         "reviewed_canonical_global_id": REVIEWED_CANONICAL_GLOBAL_ID,
@@ -198,4 +224,5 @@ def suppress_reviewed_alias_profile(
         "history_rows_changed": 0,
         "ratings_merged": False,
         "requires_producer_rebuild": True,
+        "identity_state": "REVIEWED_SPLIT_PREDECESSOR",
     }

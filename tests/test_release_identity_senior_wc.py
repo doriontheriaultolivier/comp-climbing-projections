@@ -38,6 +38,69 @@ class ReleaseIdentitySeniorWcTests(unittest.TestCase):
         self.assertEqual(audit["history_rows_changed"], 0)
         self.assertFalse(audit["ratings_merged"])
         self.assertTrue(audit["requires_producer_rebuild"])
+        self.assertEqual(audit["identity_state"], "REVIEWED_SPLIT_PREDECESSOR")
+
+    def test_reviewed_rebuilt_terminal_state_passes_without_suppression(self) -> None:
+        athletes = pd.DataFrame(
+            {
+                "global_id": ["IFSC:14843", "IFSC:123"],
+                "rating": [1989.0, 1900.0],
+            }
+        )
+        overrides = load_reviewed_identity_overrides(
+            ROOT / "data" / "reviewed_identity_overrides.csv"
+        )
+        safe, audit = suppress_reviewed_alias_profile(athletes, overrides)
+        pd.testing.assert_frame_equal(safe, athletes)
+        self.assertEqual(audit["suppressed_profile_count"], 0)
+        self.assertFalse(audit["requires_producer_rebuild"])
+        self.assertEqual(audit["identity_state"], "REVIEWED_REBUILD_RESOLVED")
+
+    def test_rebuilt_identity_keeps_ratings_but_withholds_stale_projection(self) -> None:
+        athletes = pd.DataFrame(
+            {"global_id": ["IFSC:14843"], "Global-ELO": [1989.0]}
+        )
+        history = pd.DataFrame(
+            {"global_id": ["IFSC:14843", "IFSC:14843"]}
+        )
+        projection = pd.DataFrame(
+            {
+                "athlete_id": ["IFSC:14843", "IFSC:123"],
+                "semifinal_probability_central": [0.028, 0.12],
+            }
+        )
+        safe_athletes, safe_projection, audit = (
+            quarantine_reviewed_split_identity_outputs(
+                athletes, projection, history
+            )
+        )
+        self.assertEqual(float(safe_athletes.iloc[0]["Global-ELO"]), 1989.0)
+        self.assertEqual(safe_projection["athlete_id"].tolist(), ["IFSC:123"])
+        self.assertFalse(audit["quarantine_active"])
+        self.assertTrue(audit["projection_rebuild_pending"])
+        self.assertEqual(audit["projection_rows_withheld"], 1)
+
+    def test_reviewed_identity_unexpected_cardinality_still_fails_closed(self) -> None:
+        overrides = load_reviewed_identity_overrides(
+            ROOT / "data" / "reviewed_identity_overrides.csv"
+        )
+        with self.assertRaisesRegex(ValueError, "cardinality"):
+            suppress_reviewed_alias_profile(
+                pd.DataFrame({"global_id": ["IFSC:123"]}), overrides
+            )
+        with self.assertRaisesRegex(ValueError, "cardinality"):
+            suppress_reviewed_alias_profile(
+                pd.DataFrame(
+                    {
+                        "global_id": [
+                            "IFSC:14843",
+                            "IFSC:18545",
+                            "IFSC:18545",
+                        ]
+                    }
+                ),
+                overrides,
+            )
 
     def test_override_hash_is_portable_across_line_endings(self) -> None:
         with tempfile.TemporaryDirectory(dir=ROOT) as temporary:
