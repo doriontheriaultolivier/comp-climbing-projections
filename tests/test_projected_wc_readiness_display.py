@@ -27,30 +27,20 @@ class ProjectedWcReadinessDisplayTest(unittest.TestCase):
             ]
         )
 
-    def test_verified_projection_is_distinct_from_direct_rating(self) -> None:
+    def test_zero_start_projection_is_withheld(self) -> None:
         displayed = projected_wc_readiness_display(
             self.athlete, self.projection, {"verified": True}
         )
-        self.assertTrue(displayed["available"])
-        self.assertEqual(displayed["value"], "12.3%")
-        self.assertNotEqual(displayed["value"], "1943")
-        self.assertIn("Latent-state SD 104", displayed["caption"])
-        self.assertIn("P(semifinal | starts in the reference WC field)", displayed["caption"])
-        self.assertIn("not a calibrated confidence or predictive", displayed["caption"])
-        self.assertIn("not access/selection probability", displayed["caption"])
-        self.assertIn("not a conservative lower bound", displayed["caption"])
-        self.assertIn("No direct Senior/Open WC+ start", displayed["caption"])
-        self.assertIn("0/78 reached a semifinal", displayed["caption"])
-        self.assertIn("mean forecast was 5.4%", displayed["caption"])
-        self.assertIn("never enters the direct-WC leaderboard", displayed["caption"])
+        self.assertFalse(displayed["available"])
+        self.assertEqual(displayed["value"], "Unavailable")
+        self.assertNotIn("1943", displayed["caption"])
 
     def test_evidence_class_context_is_continuous_not_a_truth_cliff(self) -> None:
         one = self.projection.assign(direct_senior_open_wc_plus_competitions=1)
         one_display = projected_wc_readiness_display(
             self.athlete, one, {"verified": True}
         )
-        self.assertIn("6/58 reached a semifinal", one_display["caption"])
-        self.assertIn("mean forecast was 13.7%", one_display["caption"])
+        self.assertFalse(one_display["available"])
 
         established = self.projection.assign(
             direct_senior_open_wc_plus_competitions=2
@@ -58,6 +48,7 @@ class ProjectedWcReadinessDisplayTest(unittest.TestCase):
         established_display = projected_wc_readiness_display(
             self.athlete, established, {"verified": True}
         )
+        self.assertTrue(established_display["available"])
         self.assertIn("established 2+ evidence class", established_display["caption"])
 
     def test_unverified_artifact_never_uses_legacy_wc_value(self) -> None:

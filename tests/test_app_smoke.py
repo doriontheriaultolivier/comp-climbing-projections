@@ -76,31 +76,24 @@ class AppSmokeTests(unittest.TestCase):
             [item.value for item in app.header],
         )
         metrics = {item.label: item.value for item in app.metric}
-        self.assertEqual(metrics["Oscar Baudrand"], "57.8%")
-        self.assertEqual(metrics["Matthew Rodriguez"], "14.4%")
-        self.assertEqual(metrics["DORVAL Hugo"], "6.7%")
+        self.assertNotIn("Oscar Baudrand", metrics)
+        self.assertNotIn("Matthew Rodriguez", metrics)
+        self.assertNotIn("DORVAL Hugo", metrics)
+        warnings = [str(item.value) for item in app.warning]
+        self.assertTrue(any("older V3 pilot is retired" in item for item in warnings))
         self.assertIn("Canadian Pool", [item.value for item in app.subheader])
         self.assertGreaterEqual(len(app.dataframe), 1)
 
-    def test_projection_interpretation_fields_and_named_regressions(self) -> None:
+    def test_retired_projection_is_not_restored_by_selection(self) -> None:
         app = AppTest.from_file(str(ROOT / "streamlit_app.py"))
         app.run(timeout=120)
         self.assertFalse(app.exception)
         self.assertFalse(app.error)
 
         metrics = {item.label: item.value for item in app.metric}
-        self.assertEqual(
-            {
-                "Oscar Baudrand": metrics["Oscar Baudrand"],
-                "Matthew Rodriguez": metrics["Matthew Rodriguez"],
-                "DORVAL Hugo": metrics["DORVAL Hugo"],
-            },
-            {
-                "Oscar Baudrand": "57.8%",
-                "Matthew Rodriguez": "14.4%",
-                "DORVAL Hugo": "6.7%",
-            },
-        )
+        self.assertNotIn("Oscar Baudrand", metrics)
+        self.assertNotIn("Matthew Rodriguez", metrics)
+        self.assertNotIn("DORVAL Hugo", metrics)
 
         for control, selection_id in zip(
             app.selectbox[:3],
@@ -114,15 +107,19 @@ class AppSmokeTests(unittest.TestCase):
         app.run(timeout=120)
         self.assertFalse(app.exception)
         selected_metrics = {item.label: item.value for item in app.metric}
-        self.assertEqual(selected_metrics["SANTOPRETE Leonardo"], "8.2%")
-        self.assertEqual(selected_metrics["ARTEAU Nicolas"], "8.7%")
-        self.assertEqual(selected_metrics["DORVAL Hugo"], "6.7%")
+        self.assertNotIn("SANTOPRETE Leonardo", selected_metrics)
+        self.assertNotIn("ARTEAU Nicolas", selected_metrics)
+        self.assertNotIn("DORVAL Hugo", selected_metrics)
 
         projection_tables = [
             element.value
             for element in app.dataframe
             if "Representative semifinal" in element.value.columns
         ]
+        self.assertEqual(projection_tables, [])
+        warnings = [str(item.value) for item in app.warning]
+        self.assertTrue(any("older V3 pilot is retired" in item for item in warnings))
+        return
         selected = next(table for table in projection_tables if len(table) == 3)
         all_current = next(table for table in projection_tables if len(table) == 81)
         self.assertEqual(

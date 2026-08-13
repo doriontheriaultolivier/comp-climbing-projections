@@ -1,0 +1,22 @@
+{
+  "schema": "canadian-current-wc-projection-v4-release-gate-v1",
+  "status": "WITHHELD_V4_NOT_AUTHORIZED_FOR_APP_INTEGRATION_V3_RETIRED",
+  "successor": {
+    "manifest_sha256": "8ca620bc987bb19849bc2c3d19f67ce565161c92a94019c5dceb973e1c4cc3de",
+    "independent_verification_receipt_sha256": "9a64cfe881503c1c4838658b45c42cec2fb62877916bf724c978d4dacb818927",
+    "canadian_projection_sha256": "97f151f885f06a2532606f531d9c56dd0ffdfce9601d841449784eac0abb9c49",
+    "snapshot_at_utc": "2026-08-13T00:00:00Z",
+    "projection_rows": 255,
+    "zero_or_one_start_rows_withheld": 172,
+    "established_research_rows": 83
+  },
+  "claims": {
+    "independent_full_recomputation": true,
+    "app_integration_authorized": false,
+    "production_rating": false,
+    "all_numeric_intervals_withheld": true,
+    "low_evidence_numeric_publication_authorized": false,
+    "retired_v3_may_be_used_as_current_fallback": false
+  },
+  "release_decision": "The older V3 numeric pilot is retained as historical evidence but cannot be presented as the current projection. V4 values remain research-only until an explicit, hash-bound calibration and app-integration successor passes."
+}

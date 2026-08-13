@@ -349,114 +349,59 @@ class CanadianPilotProjectionTests(unittest.TestCase):
         audit = data["reviewed_split_identity_quarantine"]
         self.assertTrue(audit["quarantine_active"])
         self.assertEqual(audit["alias_history_rows"], 2)
-        self.assertEqual(audit["projection_rows_withheld"], 1)
+        self.assertEqual(audit["projection_rows_withheld"], 0)
+        self.assertEqual(
+            data["current_wc_projection_metadata"]["release_status"],
+            "withheld_v4_not_authorized_for_app_integration",
+        )
         self.assertEqual(audit["history_rows_changed"], 0)
 
-    def test_current_projection_artifact_is_bound_and_tamper_closed(self) -> None:
+    def test_current_projection_is_withheld_by_bound_v4_release_gate(self) -> None:
         projection, metadata = load_current_wc_projection_artifact(Path("data"))
-        self.assertTrue(metadata.get("verified"))
-        self.assertFalse(projection.empty)
-        self.assertTrue(metadata["calibration"]["event_clean_refit"])
-        self.assertTrue(
-            metadata["low_wc_evidence_calibration"]["event_clean_refit"]
-        )
+        self.assertTrue(projection.empty)
+        self.assertFalse(metadata.get("verified"))
         self.assertEqual(
-            metadata["low_wc_evidence_calibration"]["central_route"],
-            "separate_k0_k1_intercept_adjusted_links",
+            metadata["release_status"],
+            "withheld_v4_not_authorized_for_app_integration",
         )
-        self.assertGreater(
-            metadata["low_wc_evidence_calibration"]["zero_prior"][
-                "slope_per_100"
-            ],
-            0.0,
-        )
-        self.assertIsNone(metadata["model"]["initializer_warm_start_sha256"])
-        routing = metadata["model"]["target_domain_routing"]
-        self.assertEqual(routing["schema"], "ifsc-youth-world-separate-target-head-v1")
-        self.assertEqual(routing["rows_routed"], 5752)
-        self.assertEqual(routing["source_events_routed"], 11)
-        self.assertEqual(routing["pool_events_routed"], 22)
-        self.assertEqual(routing["youth_world_rows_in_senior_wc_target_state"], 0)
-        self.assertTrue(routing["senior_open_world_major_preserved_in_wc_plus"])
-        post_cutoff = routing["post_cutoff_replay"]
-        self.assertEqual(post_cutoff["pool_events"], 6)
-        self.assertEqual(post_cutoff["athlete_events"], 1111)
-        self.assertEqual(post_cutoff["youth_world_events_in_wc_plus"], 0)
-        self.assertEqual(
-            post_cutoff["all_history_source_event_inventory_sha256"],
-            "28fe20328b6eb6c6ed8893a045ff2eea66940f3a4cd47aa83d70ac6daef9005a",
-        )
-        self.assertTrue(
-            metadata["claims"]["youth_world_shared_skill_graph_preserved"]
-        )
-        self.assertFalse(
-            metadata["claims"]["youth_world_directly_updates_senior_wc_offset"]
-        )
-        for evidence_class in ("zero_prior", "one_prior"):
-            self.assertEqual(
-                metadata["low_wc_evidence_calibration"][evidence_class][
-                    "slope_policy"
-                ],
-                "fixed_to_clean_base_slope",
-            )
-        self.assertFalse(
-            metadata["claims"]["rating_state_sensitivity_uses_bridge_sd"]
-        )
-        raw_athletes = pd.read_parquet("data/boulder_overview_athletes.parquet")
-        raw_history = pd.read_parquet("data/boulder_overview_history.parquet")
-        retained, _, _ = quarantine_obvious_fixture_exposure(
-            raw_athletes, raw_history
-        )
-        exposed_cnr_ids = set(
-            retained.loc[
-                retained["legacy_fixture_exposed"]
-                & pd.to_numeric(retained["cnr_rank"], errors="coerce").notna(),
-                "global_id",
-            ].astype(str)
-        )
-        self.assertEqual(len(exposed_cnr_ids), 4)
-        available_by_id = projection.set_index("athlete_id")["projection_status"]
-        self.assertTrue(exposed_cnr_ids.issubset(set(available_by_id.index)))
-        self.assertTrue(
-            available_by_id.loc[sorted(exposed_cnr_ids)]
-            .eq("exploratory_current_reference_available")
-            .all()
-        )
+        self.assertTrue(metadata["retired_v3_artifact_verified"])
+        self.assertFalse(metadata["claims"]["app_integration_authorized"])
+        self.assertEqual(metadata["successor"]["zero_or_one_start_rows_withheld"], 172)
+        self.assertEqual(metadata["successor"]["established_research_rows"], 83)
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for name in (
                 "canadian_current_wc_projection_v3_youth_world_complete.csv",
                 "canadian_current_wc_projection_v3_youth_world_complete.metadata.json",
+                "canadian_current_wc_projection_v4_release_gate.json",
+            ):
+                shutil.copy2(Path("data") / name, root / name)
+            gate_path = root / "canadian_current_wc_projection_v4_release_gate.json"
+            payload = json.loads(gate_path.read_text(encoding="utf-8"))
+            payload["claims"]["app_integration_authorized"] = True
+            gate_path.write_text(json.dumps(payload), encoding="utf-8")
+            rejected, audit = load_current_wc_projection_artifact(root)
+            self.assertTrue(rejected.empty)
+            self.assertEqual(audit["release_status"], "withheld_invalid_v4_release_gate")
+            self.assertIn("fail-closed", audit["reason"])
+
+    def test_retired_v3_tamper_does_not_restore_a_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name in (
+                "canadian_current_wc_projection_v3_youth_world_complete.csv",
+                "canadian_current_wc_projection_v3_youth_world_complete.metadata.json",
+                "canadian_current_wc_projection_v4_release_gate.json",
             ):
                 shutil.copy2(Path("data") / name, root / name)
             with (
                 root / "canadian_current_wc_projection_v3_youth_world_complete.csv"
-            ).open(
-                "a", encoding="utf-8"
-            ) as destination:
+            ).open("a", encoding="utf-8") as destination:
                 destination.write("\n")
             rejected, audit = load_current_wc_projection_artifact(root)
             self.assertTrue(rejected.empty)
-            self.assertFalse(audit.get("verified"))
-            self.assertIn("hash mismatch", str(audit.get("reason")))
-
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            csv_name = "canadian_current_wc_projection_v3_youth_world_complete.csv"
-            metadata_name = (
-                "canadian_current_wc_projection_v3_youth_world_complete.metadata.json"
-            )
-            shutil.copy2(Path("data") / csv_name, root / csv_name)
-            payload = json.loads((Path("data") / metadata_name).read_text(encoding="utf-8"))
-            payload["model"]["target_domain_routing"][
-                "youth_world_rows_in_senior_wc_target_state"
-            ] = 1
-            (root / metadata_name).write_text(json.dumps(payload), encoding="utf-8")
-            rejected, audit = load_current_wc_projection_artifact(root)
-            self.assertTrue(rejected.empty)
-            self.assertFalse(audit.get("verified"))
-            self.assertIn("routing closure", str(audit.get("reason")))
+            self.assertFalse(audit.get("retired_v3_artifact_verified"))
 
 
 if __name__ == "__main__":
