@@ -53,7 +53,9 @@ class StyleTaggingAppTest(unittest.TestCase):
             )
         )
         self.assertIn("Save style-tag proposal", [button.label for button in app.button])
-        self.assertTrue(str(app.selectbox[3].value).startswith("Priority 1 ·"))
+        self.assertTrue(str(app.selectbox[3].value).startswith("Coaching 1 ·"))
+        self.assertEqual(app.radio[0].label, "Review order")
+        self.assertEqual(app.radio[0].value, "Coaching evidence unlocked")
 
     def test_standalone_tagger_owns_its_data_path(self) -> None:
         self.assertEqual(module.DATA, PATH.parents[0] / "data")
@@ -153,6 +155,42 @@ class StyleTaggingAppTest(unittest.TestCase):
         self.assertEqual(result.iloc[0]["priority_zone_pairs"], 3)
         self.assertEqual(result.iloc[1]["priority_status"], "General governed inventory")
         self.assertEqual(len(result), 2)
+
+    def test_coaching_unlock_priority_is_separate_and_defaults_first(self) -> None:
+        inventory = pd.DataFrame([{
+            "source_scope": "CEC", "source_event_id": 224,
+            "source_round_ids": "4420", "boulder_number": 3,
+            "event_date": "2026-05-14", "event_name": "Youth Nationals",
+            "round_group": "Qualification", "gender": "Men",
+            "boulder_uid": "round-youth-national-b3",
+        }])
+        priority = pd.DataFrame([{
+            "source_scope": "CEC", "source_event_id": 224,
+            "source_round_id": 4420, "boulder_number": 3,
+            "priority_rank": 20, "linked_athletes": 7, "linked_outcomes": 7,
+            "coaching_unlock_rank": 1, "coaching_athletes_unlocked": 8,
+            "coaching_observations_unlocked": 145,
+            "physical_observations_unlocked": 103,
+            "board_observations_unlocked": 42,
+        }])
+        row = module.apply_tagging_priority(inventory, priority).iloc[0]
+        self.assertEqual(row["priority_rank"], 20)
+        self.assertEqual(row["coaching_unlock_rank"], 1)
+        self.assertEqual(row["coaching_unlock_observations"], 145)
+        self.assertTrue(module.problem_display(row).startswith("Coaching 1 ·"))
+        self.assertTrue(
+            module.problem_display(row, prefer_coaching=False).startswith("Priority 20 ·")
+        )
+
+    def test_app_coaching_unlock_file_contains_no_athlete_identity_or_values(self) -> None:
+        path = Path(__file__).parents[1] / "data" / "physical_item_tag_unlock_app_v1.csv"
+        queue = pd.read_csv(path)
+        self.assertEqual(len(queue), 535)
+        self.assertTrue(queue["problem_id"].is_unique)
+        forbidden = {
+            "athlete_id", "athlete_name", "metric_id", "value", "test_result"
+        }
+        self.assertFalse(forbidden.intersection(queue.columns))
 
     def test_ranked_review_milestones_report_cumulative_information(self) -> None:
         priority = pd.read_csv(
