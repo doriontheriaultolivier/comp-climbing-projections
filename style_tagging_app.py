@@ -328,6 +328,30 @@ def load_shared_records(url: str) -> tuple[list[dict[str, object]], str]:
         return [], f"Shared tag list is unavailable: {exc}"
 
 
+def reviewed_boulder_uids(records: list[dict[str, object]]) -> set[str]:
+    """Return exact governed Boulder identities with a saved review."""
+
+    return {
+        str(record["boulder_uid"])
+        for record in records
+        if isinstance(record, dict) and str(record.get("boulder_uid", "")).strip()
+    }
+
+
+def pending_review_inventory(
+    inventory: pd.DataFrame,
+    records: list[dict[str, object]],
+    *,
+    include_completed: bool = False,
+) -> pd.DataFrame:
+    """Keep governed ordering while hiding exact completed tasks by default."""
+
+    if include_completed or inventory.empty or "boulder_uid" not in inventory:
+        return inventory.copy()
+    completed = reviewed_boulder_uids(records)
+    return inventory.loc[~inventory["boulder_uid"].astype(str).isin(completed)].copy()
+
+
 def main() -> None:
     st.set_page_config(page_title="Comp Climbing Boulder Tags", page_icon="B", layout="wide")
     st.title("Comp Climbing Boulder Tags")
@@ -337,7 +361,18 @@ def main() -> None:
     if inventory.empty:
         st.error("The governed boulder inventory is unavailable; tagging is disabled until it is restored.")
         return
+    url = backend_url()
+    shared: list[dict[str, object]] = []
+    shared_error = ""
+    if url:
+        shared, shared_error = load_shared_records(url)
+    session_records = st.session_state.get("style_tag_records", [])
+    all_records = [*shared, *session_records]
+    completed_uids = reviewed_boulder_uids(all_records)
     prioritized = inventory.loc[inventory["priority_rank"].notna()]
+    reviewed_prioritized = int(
+        prioritized["boulder_uid"].astype(str).isin(completed_uids).sum()
+    )
     source_priority_items = int(prioritized["priority_source_items"].fillna(0).sum())
     top_pair_tasks = int(prioritized["priority_top_given_zone_pairs"].gt(0).sum())
     top_pairs = int(prioritized["priority_top_given_zone_pairs"].sum())
@@ -363,12 +398,32 @@ def main() -> None:
         f"also covers {zone_pairs:,} Zone comparisons. This orders human review by "
         "expected evidence reuse, not by athlete importance."
     )
-    events = inventory[["event_name", "event_date"]].drop_duplicates()
+    include_completed = st.checkbox(
+        "Include already reviewed boulders",
+        value=False,
+        help="Completed tasks remain available for inspection but are hidden during rapid review.",
+    )
+    review_inventory = pending_review_inventory(
+        inventory,
+        all_records,
+        include_completed=include_completed,
+    )
+    st.caption(
+        f"Progress: {reviewed_prioritized:,}/{len(prioritized):,} prioritized governed "
+        "tasks have a saved review. The form starts at the highest-priority unreviewed task."
+    )
+    flash = st.session_state.pop("style_tag_flash", None)
+    if isinstance(flash, tuple) and len(flash) == 2:
+        (st.success if flash[0] == "success" else st.warning)(str(flash[1]))
+    if review_inventory.empty:
+        st.success("Every governed Boulder in the current view has a saved review.")
+        return
+    events = review_inventory[["event_name", "event_date"]].drop_duplicates()
     event_labels = [f"{row.event_date.date().isoformat() if pd.notna(row.event_date) else 'Date unknown'} — {row.event_name}" for row in events.itertuples(index=False)]
     with st.form("style_tag_form", clear_on_submit=True):
         event_label = st.selectbox("Competition", event_labels)
         event_name = event_label.split(" — ", 1)[-1]
-        event_rows = inventory.loc[inventory.event_name.eq(event_name)]
+        event_rows = review_inventory.loc[review_inventory.event_name.eq(event_name)]
         round_name = st.selectbox(
             "Round",
             event_rows["round_group"].dropna().astype(str).drop_duplicates().tolist(),
@@ -448,20 +503,27 @@ def main() -> None:
         url = backend_url()
         if url:
             saved, message = save_remotely(url, record, image_bytes)
-            (st.success if saved else st.warning)(message)
+            st.session_state["style_tag_flash"] = (
+                "success" if saved else "warning",
+                message,
+            )
+            if saved:
+                load_shared_records.clear()
         else:
-            st.success("Saved in this session. Download the review file before closing the tab.")
+            st.session_state["style_tag_flash"] = (
+                "success",
+                "Saved in this session. Download the review file before closing the tab.",
+            )
+        st.rerun()
     records = st.session_state.get("style_tag_records", [])
     if records:
         st.subheader("Current review records")
         st.dataframe(pd.DataFrame(records), hide_index=True, width="stretch")
         st.download_button("Download style-tag review JSON", json.dumps(records, indent=2), "comp_climbing_style_tags.json", "application/json")
-    url = backend_url()
     if url:
         st.divider(); st.subheader("Recent shared tags")
         if st.button("Refresh shared tags"):
             load_shared_records.clear()
-        shared, shared_error = load_shared_records(url)
         if shared_error:
             st.caption(shared_error)
         elif shared:

@@ -87,6 +87,29 @@ class StyleTaggingAppTest(unittest.TestCase):
         self.assertEqual(module.shared_records_url("https://example.test/exec", 25), "https://example.test/exec?action=list&limit=25")
         self.assertEqual(module.shared_records_url("https://example.test/exec?token=public", 25), "https://example.test/exec?token=public&action=list&limit=25")
 
+    def test_completed_boulders_are_hidden_without_reordering_pending_work(self) -> None:
+        inventory = pd.DataFrame(
+            [
+                {"boulder_uid": "round-a-b1", "priority_rank": 1},
+                {"boulder_uid": "round-a-b2", "priority_rank": 2},
+                {"boulder_uid": "round-a-b3", "priority_rank": 3},
+            ]
+        )
+        records = [
+            {"boulder_uid": "round-a-b1"},
+            {"boulder_uid": "round-a-b1"},
+            {"unrelated": "record"},
+        ]
+        pending = module.pending_review_inventory(inventory, records)
+        self.assertEqual(pending["boulder_uid"].tolist(), ["round-a-b2", "round-a-b3"])
+        complete = module.pending_review_inventory(
+            inventory,
+            records,
+            include_completed=True,
+        )
+        self.assertEqual(complete["boulder_uid"].tolist(), inventory["boulder_uid"].tolist())
+        self.assertEqual(module.reviewed_boulder_uids(records), {"round-a-b1"})
+
     def test_exact_round_priority_is_attached_without_excluding_other_items(self) -> None:
         inventory = pd.DataFrame([
             {
