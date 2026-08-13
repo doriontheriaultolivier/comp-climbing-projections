@@ -62,6 +62,8 @@ def test_probability_spectrum_render_is_clear_and_research_only() -> None:
     )
     assert "Does the probability scale reflect demonstrated level?" in text
     assert "too compressed toward 50%" in text
+    assert "former T=3 repair is now retired" in text
+    assert "target-event panel stays unavailable" in text
     assert "aggregate model checks, not athlete labels" in text
     assert "CNR" in text
     assert "CNR residual direction reverses" in text

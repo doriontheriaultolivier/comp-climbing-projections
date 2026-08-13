@@ -45,8 +45,9 @@ def test_shadow_render_is_visibly_research_only() -> None:
     app = AppTest.from_function(render_shadow_fixture).run(timeout=20)
     assert not app.exception
     text = "\n".join(item.value for item in [*app.subheader, *app.caption, *app.markdown])
-    assert "Shadow probability calibration" in text
-    assert "not yet applied to the current athlete cards" in text
+    assert "Retired shadow calibration evidence" in text
+    assert "not applied to current athlete cards or target-event probabilities" in text
+    assert "fresh reproducible run selected no replacement model" in text
     assert "frozen V4 family" in text
     assert "T=3.0" in text
     assert load_joint_temperature_shadow()["source_bindings"]["stage_a_predictions_sha256"] == (
