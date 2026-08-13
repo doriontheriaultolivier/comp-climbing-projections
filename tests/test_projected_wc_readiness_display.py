@@ -33,9 +33,11 @@ class ProjectedWcReadinessDisplayTest(unittest.TestCase):
         self.assertTrue(displayed["available"])
         self.assertEqual(displayed["value"], "1512")
         self.assertNotEqual(displayed["value"], "1943")
-        self.assertIn("80% latent-readiness interval", displayed["caption"])
+        self.assertIn("latent-state SD 104", displayed["caption"])
+        self.assertIn("not a calibrated confidence or predictive interval", displayed["caption"])
+        self.assertIn("not point-for-point comparable", displayed["caption"])
         self.assertIn("No direct Senior/Open WC+ start", displayed["caption"])
-        self.assertIn("never enters the direct WC leaderboard", displayed["caption"])
+        self.assertIn("never enters its leaderboard", displayed["caption"])
 
     def test_unverified_artifact_never_uses_legacy_wc_value(self) -> None:
         displayed = projected_wc_readiness_display(
