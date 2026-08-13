@@ -2685,8 +2685,6 @@ def projected_wc_readiness_display(
     ).iloc[0]
     if not np.isfinite(median) or not np.isfinite(sd) or sd <= 0 or not np.isfinite(direct):
         return unavailable
-    z80 = 1.2815515655446004
-    lower, upper = median - z80 * sd, median + z80 * sd
     evidence = (
         f"{int(direct)} direct Senior/Open WC+ competition(s)"
         if direct > 0
@@ -2696,8 +2694,10 @@ def projected_wc_readiness_display(
         "available": True,
         "value": f"{median:.0f}",
         "caption": (
-            f"Posterior median; 80% latent-readiness interval {lower:.0f}–{upper:.0f}. "
-            f"{evidence}. This projection never enters the direct WC leaderboard."
+            f"Exploratory target-scale coordinate (latent-state SD {sd:.0f}); {evidence}. "
+            "This SD is not a calibrated confidence or predictive interval. The target "
+            "coordinate is not point-for-point comparable with the legacy direct rating "
+            "and never enters its leaderboard."
         ),
     }
 
