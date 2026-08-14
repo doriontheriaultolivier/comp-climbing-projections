@@ -1,0 +1,35 @@
+{
+  "schema": "physical-support-chronology-alignment-v1",
+  "status": "PREREGISTERED_WAITING_FOR_HUMAN_TAG_EVIDENCE",
+  "promotion_authority": false,
+  "bindings": {
+    "physical_support_challenger_contract_commit": "44e72b686935ffeb8490730651e553b36b40ab30",
+    "physical_support_challenger_contract_sha256": "aa0a5da9de76b766c88ec496b772011eb9fc1dfc3780aa2fba82e695f263f9cb",
+    "physical_transfer_chronology_commit": "84c03853bf7e49e2930548b5a8ed98e2ceb17570",
+    "physical_transfer_design_review_sha256": "c85282116d30961da76fa1b00219b9c8e35ca25031b1c06dd7c787205906e5ad",
+    "physical_transfer_chronology_source_sha256": "49d51e2af941c60db738563f7b8859b4aa60fc2d8af97a4cfb1ed1a5b24bd9a0"
+  },
+  "adjudication": {
+    "model_ladder_changed": false,
+    "primary_estimands": [
+      "probability_of_zone_on_exact_tagged_item",
+      "probability_of_top_conditional_on_zone_on_exact_tagged_item"
+    ],
+    "ordinal_irt_role": "auxiliary_benchmark_or_hierarchical_parameterization_not_a_replacement_estimand",
+    "target_event_tags_in_pre_event_projection": "prohibited",
+    "target_event_tags_in_post_event_coaching": "required_with_observation_timestamp_and_reviewer_provenance",
+    "earlier_event_tags": "eligible_only_when_available_before_the_target_event_and_used_to_learn_general_relationships",
+    "board_expression_before_physical_capacity": true,
+    "ceiling_frontier_before_board_baseline_passes": false,
+    "stress_or_pressure_inference": "not_authorized",
+    "training_prescription": "not_authorized"
+  },
+  "next_executable_gate": {
+    "name": "materialize_reviewed_tag_consensus_and_recompute_continuous_support",
+    "requires_human_confirmed_tag_rows": true,
+    "requires_exact_item_identity": true,
+    "requires_tag_submission_time": true,
+    "requires_independent_reviewer_evidence": true,
+    "fit_model_now": false
+  }
+}

@@ -14,6 +14,10 @@ CANDIDATES = ROOT / "data/physical_item_tagging_priority_v1_1.csv"
 
 
 class PhysicalItemTagUnlockTest(unittest.TestCase):
+    @unittest.skipUnless(
+        BUNDLES.exists() and CANDIDATES.exists(),
+        "restricted bundle or candidate evidence is not present in this clean worktree",
+    )
     def test_real_unlock_is_pending_and_keeps_gaps(self) -> None:
         bundles = pd.read_csv(BUNDLES, low_memory=False)
         candidates = pd.read_csv(CANDIDATES, low_memory=False)

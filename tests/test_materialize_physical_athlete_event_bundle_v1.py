@@ -20,6 +20,10 @@ TIMELINE = ROOT / ".artifacts/physical-competition-timeline-v1/timeline.csv.gz"
 
 
 class PhysicalAthleteEventBundleTest(unittest.TestCase):
+    @unittest.skipUnless(
+        TIMELINE.exists(),
+        "restricted timeline artifact is not present in this clean worktree",
+    )
     def test_real_bundle_preserves_round_vector_without_scalar_outcome(self) -> None:
         timeline = pd.read_csv(TIMELINE, low_memory=False)
         bundles, receipt = build_bundles(timeline)

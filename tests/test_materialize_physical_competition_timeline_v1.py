@@ -12,9 +12,19 @@ SNAPSHOT = (
     CORE / ".artifacts/restricted/physical-transfer-sheet-snapshot-v1/"
     "5011bd3dd7bdd767027fbdecfe65a46f6ca7b6f9fb31169e314810998b3c647d"
 )
+REAL_INPUTS = (
+    SNAPSHOT / "physical_observations.csv",
+    SNAPSHOT / "board_observations.csv",
+    ROOT / ".artifacts/physical-result-identity-bridge-v1/governed_links.csv",
+    ROOT / "data/source_results.csv.gz",
+)
 
 
 class PhysicalCompetitionTimelineTest(unittest.TestCase):
+    @unittest.skipUnless(
+        all(path.exists() for path in REAL_INPUTS),
+        "restricted real-data inputs are not present in this clean worktree",
+    )
     def test_real_timeline_is_chronological_and_descriptive(self) -> None:
         timeline, receipt = build_timeline(
             SNAPSHOT / "physical_observations.csv",

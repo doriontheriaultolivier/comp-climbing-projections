@@ -14,9 +14,19 @@ SNAPSHOT = (
     CORE / ".artifacts/restricted/physical-transfer-sheet-snapshot-v1/"
     "5011bd3dd7bdd767027fbdecfe65a46f6ca7b6f9fb31169e314810998b3c647d"
 )
+REAL_INPUTS = (
+    SNAPSHOT / "physical_observations.csv",
+    SNAPSHOT / "board_observations.csv",
+    ROOT / ".artifacts/physical-athlete-event-round-vector-v1/athlete_event_round_vectors.csv.gz",
+    ROOT / "data/physical_item_tagging_priority_v1_1.csv",
+)
 
 
 class PhysicalSupportEstimabilityTest(unittest.TestCase):
+    @unittest.skipUnless(
+        all(path.exists() for path in REAL_INPUTS),
+        "restricted real-data inputs are not present in this clean worktree",
+    )
     def test_real_profiles_are_continuous_and_non_authorizing(self) -> None:
         profiles, receipt = build_estimability(
             pd.read_csv(SNAPSHOT / "physical_observations.csv"),
