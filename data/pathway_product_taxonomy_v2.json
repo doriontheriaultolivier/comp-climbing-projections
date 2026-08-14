@@ -1,0 +1,34 @@
+{
+  "schema": "pathway-product-taxonomy-v2",
+  "status": "RESEARCH_PRODUCT_VOCABULARY_NO_RATING_PROMOTION",
+  "ladders": {
+    "youth": ["Y-NAT", "Y-REG", "YW-IFSC"],
+    "open": ["NAT", "REG", "WC+"],
+    "derived_scenario": "OLY"
+  },
+  "semantics": {
+    "overall": "shared connected-graph level",
+    "demonstrated": "direct governed evidence in the named context",
+    "ready": "projected performance in a governed reference field for the named context",
+    "oly": "conditional field-and-format scenario derived primarily from WC+ evidence; not a standalone rating"
+  },
+  "regional_policy": {
+    "nacs_and_pan_american_share_broad_head": true,
+    "broad_head": "REG",
+    "event_subtype_remains_visible": true,
+    "reason": "shared coaching level without pretending a series and a continental championship are identical procedures"
+  },
+  "evidence_policy": {
+    "all_valid_results_update_shared_graph": true,
+    "youth_results_directly_populate_open_heads": false,
+    "zero_direct_starts_forces_ready_to_missing": false,
+    "structural_disconnection_can_force_ready_to_missing": true,
+    "ready_requires_validated_reference_field": true,
+    "current_numeric_release_authorized": false
+  },
+  "display_policy": {
+    "elo_required_in_product_name": false,
+    "two_anchor_scale_authorized_now": false,
+    "interval_authorized_now": false
+  }
+}
