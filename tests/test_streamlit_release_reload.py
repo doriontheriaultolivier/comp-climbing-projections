@@ -25,4 +25,9 @@ def test_entrypoint_and_app_module_share_release_identifier() -> None:
 def test_entrypoint_has_release_mismatch_reload_guard() -> None:
     source = (ROOT / "streamlit_app.py").read_text(encoding="utf-8")
     assert 'getattr(comp_climbing_app, "APP_CODE_RELEASE", None) != APP_RELEASE' in source
+    assert "import future_vision_demo" in source
+    assert "importlib.reload(future_vision_demo)" in source
     assert "importlib.reload(comp_climbing_app)" in source
+    assert source.index("importlib.reload(future_vision_demo)") < source.index(
+        "importlib.reload(comp_climbing_app)"
+    )
