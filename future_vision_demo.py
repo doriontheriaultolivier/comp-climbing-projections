@@ -14,7 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from scripts.pathway_product_taxonomy_v2 import OPEN_LADDER, YOUTH_LADDER
+from scripts.pathway_product_taxonomy_v3 import OPEN_LADDER, YOUTH_LADDER
 
 
 SYNTHETIC_MARK = "SYNTHETIC SCENARIO - ILLUSTRATIVE OUTPUT ONLY"
@@ -59,13 +59,13 @@ PERSONAS = (
         "Sam Pressureproof", 2008, "Competition accessibility above physical ceiling",
         "Competition outcomes repeatedly exceed what isolated physical benchmarks would suggest.",
         13.4, 18.1, 1290, 96, 73, 79, 88, 93,
-        ("Y-NAT", "Y-REG", "YW-IFSC", "NAT", "REG"),
+        ("Y-NAT", "Y-REG", "YW-IFSC", "NAT", "REG-IFSC"),
     ),
     SyntheticPersona(
         "Alex Latebloomer", 2006, "Recent acceleration with limited historical support",
         "A sharp recent rise is promising, but the evidence window remains short.",
         15.2, 20.0, 1220, 145, 84, 81, 76, 74,
-        ("Y-NAT", "NAT", "REG"),
+        ("Y-NAT", "NAT", "REG-IFSC"),
     ),
 )
 
@@ -98,7 +98,7 @@ def synthetic_pathway(persona: SyntheticPersona) -> pd.DataFrame:
     """Build internally nested illustrative pathway outputs for one persona."""
     level_difficulty = {
         "Y-NAT": 1420, "Y-REG": 1580, "YW-IFSC": 1750,
-        "NAT": 1640, "REG": 1810, "WC+": 2040,
+        "NAT": 1640, "REG-IFSC": 1810, "WC+": 2040,
     }
     state = float(synthetic_history(persona).iloc[-1]["historical_state"])
     rows = []
@@ -169,7 +169,7 @@ def _render_hero() -> None:
     )
     cols = st.columns(4)
     items = (
-        ("01", "See the pathway", "Y-NAT → Y-REG → YW-IFSC and NAT → REG → WC+"),
+        ("01", "See the pathway", "Y-NAT → Y-REG → YW-IFSC and NAT → REG-IFSC → WC+"),
         ("02", "Compare development", "Youth categories, senior open fields and future-elite references"),
         ("03", "Find the constraint", "Physical ceiling → training transfer → competition access"),
         ("04", "Test decisions", "Turn evidence gaps into hypotheses and coach questions"),
@@ -345,7 +345,7 @@ def render_future_vision_demo() -> None:
     st.subheader("Development and competition pathways")
     youth, senior = st.columns(2)
     youth.info("**Youth pathway**  ·  Y-NAT  →  Y-REG  →  YW-IFSC")
-    senior.info("**Open pathway**  ·  NAT  →  REG  →  WC+")
+    senior.info("**Open pathway**  ·  NAT  →  REG-IFSC  →  WC+")
     st.dataframe(
         synthetic_pathway(persona), use_container_width=True, hide_index=True,
         column_config={"Level": st.column_config.TextColumn(width="small")},

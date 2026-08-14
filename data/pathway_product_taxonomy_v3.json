@@ -1,0 +1,25 @@
+{
+  "schema": "pathway-product-taxonomy-v3",
+  "status": "PRODUCT_VOCABULARY_NO_RATING_PROMOTION",
+  "ladders": {
+    "youth": ["Y-NAT", "Y-REG", "YW-IFSC"],
+    "open": ["NAT", "REG-IFSC", "WC+"],
+    "derived_scenario": "OLY"
+  },
+  "regional_policy": {
+    "nacs_and_pan_american_share_broad_head": true,
+    "broad_head": "REG-IFSC",
+    "event_subtype_remains_visible": true
+  },
+  "evidence_policy": {
+    "all_valid_results_update_shared_graph": true,
+    "youth_results_directly_populate_open_heads": false,
+    "ready_requires_validated_reference_field": true,
+    "current_numeric_release_authorized": false
+  },
+  "display_policy": {
+    "elo_required_in_product_name": false,
+    "olympics_is_scenario_only": true,
+    "two_anchor_scale_authorized_now": false
+  }
+}
