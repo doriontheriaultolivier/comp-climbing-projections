@@ -9,7 +9,10 @@ taxonomy:
 
 `FED` remains an internal data-source prefix because it identifies the governing
 federation. It is not a useful user-facing level name, so the product says
-`NAT`. The youth equivalent is explicitly `Y-NAT`.
+`NAT`. The youth equivalent is explicitly `Y-NAT`. Internally these remain
+federation-specific heads—`NAT:CAN`, `NAT:USA`, and so on—not one isolated
+worldwide national ledger. Their cross-country comparability comes from the
+shared graph and bridge athletes.
 
 NACS and Pan-American competitions both enter the broad `REG` head. They remain
 different event subtypes—North America series versus continental

@@ -62,5 +62,7 @@ def test_machine_contract_remains_research_only() -> None:
     assert contract["ladders"]["youth"][0] == "Y-NAT"
     assert contract["ladders"]["open"][0] == "NAT"
     assert contract["regional_policy"]["nacs_and_pan_american_share_broad_head"]
+    assert contract["national_policy"]["internal_head_is_federation_specific"]
+    assert contract["national_policy"]["one_isolated_global_nat_ledger"] is False
     assert contract["evidence_policy"]["current_numeric_release_authorized"] is False
     assert contract["display_policy"]["two_anchor_scale_authorized_now"] is False

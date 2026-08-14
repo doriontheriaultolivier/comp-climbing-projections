@@ -18,6 +18,13 @@
     "event_subtype_remains_visible": true,
     "reason": "shared coaching level without pretending a series and a continental championship are identical procedures"
   },
+  "national_policy": {
+    "one_isolated_global_nat_ledger": false,
+    "internal_head_is_federation_specific": true,
+    "product_label": "NAT",
+    "youth_product_label": "Y-NAT",
+    "cross_federation_comparison_uses_shared_graph": true
+  },
   "evidence_policy": {
     "all_valid_results_update_shared_graph": true,
     "youth_results_directly_populate_open_heads": false,
