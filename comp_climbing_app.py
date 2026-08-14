@@ -21,6 +21,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from future_vision_demo import render_future_vision_demo
+
 from release_identity_senior_wc import (
     load_reviewed_identity_overrides,
     quarantine_reviewed_split_identity_outputs,
@@ -3696,37 +3698,13 @@ def require_optional_password() -> None:
     st.stop()
 
 
-def main() -> None:
-    st.set_page_config(
-        page_title="Comp Climbing Projections",
-        page_icon="🧗",
-        layout="wide",
-        initial_sidebar_state="collapsed",
+def render_evidence_lab() -> None:
+    """Render the real-data research workspace without implying product readiness."""
+    st.markdown("## Evidence Lab")
+    st.caption(
+        "Real research workspace. Shared-scale, youth-to-senior transport, and "
+        "Canadian-to-world calibration remain active model-development questions."
     )
-    st.markdown(
-        """
-        <style>
-        .block-container{max-width:1500px;padding-top:1.2rem;padding-bottom:4rem}
-        h1,h2,h3{color:#102F2B;letter-spacing:-.025em}
-        [data-testid="stMetric"]{background:#F4F8F7;border:1px solid #DCE7E4;border-radius:14px;padding:14px}
-        [data-testid="stHorizontalBlock"]{gap:.8rem}
-        .stCaption{color:#627571}
-        @media(max-width:640px){
-          .block-container{padding:.7rem .75rem 3rem}
-          h1{font-size:2rem!important}
-          [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
-          [data-testid="column"]{min-width:100%!important}
-          .js-plotly-plot{min-height:420px}
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    require_optional_password()
-    st.title("Comp Climbing Projections")
-    st.markdown("### Strength, depth and progression of canadian climbers: from local comps to the Olympics")
-    st.caption("Boulder release · model evidence supports coaching and governance judgment; it does not replace it.")
-
     data = read_data()
     startup_status(data)
     if data["athletes"].empty:
@@ -3794,6 +3772,48 @@ def main() -> None:
             "- **IFSC-ELO-Qualies / Semies / Finals:** only the named round of non-para IFSC events.\n"
             "- **Performance-ELO:** the isolated level shown in one round, calculated from ratings frozen before the event."
         )
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="Sport Performance Intelligence",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
+    st.markdown(
+        """
+        <style>
+        .block-container{max-width:1500px;padding-top:1.2rem;padding-bottom:4rem}
+        h1,h2,h3{color:#102F2B;letter-spacing:-.025em}
+        [data-testid="stMetric"]{background:#F4F8F7;border:1px solid #DCE7E4;border-radius:14px;padding:14px}
+        [data-testid="stHorizontalBlock"]{gap:.8rem}
+        .stCaption{color:#627571}
+        @media(max-width:640px){
+          .block-container{padding:.7rem .75rem 3rem}
+          h1{font-size:2rem!important}
+          [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
+          [data-testid="column"]{min-width:100%!important}
+          .js-plotly-plot{min-height:420px}
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    require_optional_password()
+    st.title("Sport Performance Intelligence")
+    st.markdown("### Competition Climbing pilot")
+    st.caption(
+        "A private product-development workspace for projection, development, "
+        "and coaching decisions."
+    )
+    vision_tab, evidence_tab = st.tabs(
+        ("Future Vision - synthetic", "Evidence Lab - real research")
+    )
+    with vision_tab:
+        render_future_vision_demo()
+    with evidence_tab:
+        render_evidence_lab()
 
 
 if __name__ == "__main__":

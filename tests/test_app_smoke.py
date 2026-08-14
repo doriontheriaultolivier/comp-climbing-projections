@@ -70,7 +70,7 @@ class AppSmokeTests(unittest.TestCase):
         app.run(timeout=120)
         self.assertFalse(app.exception)
         self.assertFalse(app.error)
-        self.assertEqual(app.title[0].value, "Comp Climbing Projections")
+        self.assertEqual(app.title[0].value, "Sport Performance Intelligence")
         self.assertIn(
             "Canadian performance benchmark pilot",
             [item.value for item in app.header],
