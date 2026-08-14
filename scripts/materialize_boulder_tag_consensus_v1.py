@@ -40,6 +40,48 @@ def load_records(path: Path) -> list[dict[str, object]]:
     return payload
 
 
+def latest_records_for_boulders(
+    records: list[dict[str, object]], allowed_boulder_uids: set[str]
+) -> tuple[list[dict[str, object]], int]:
+    """Validate records and keep the latest whole record per reviewer/Boulder."""
+
+    accepted: list[dict[str, object]] = []
+    outside_scope = 0
+    for input_order, record in enumerate(records):
+        if str(record.get("schema_version", "")) != "4.0":
+            raise ValueError("only schema-v4 records are accepted")
+        reviewer = str(record.get("contributor", "")).strip()
+        if REVIEWER_RE.fullmatch(reviewer) is None:
+            raise ValueError("invalid pseudonymous reviewer code")
+        boulder_uid = str(record.get("boulder_uid", "")).strip()
+        if not boulder_uid:
+            raise ValueError("boulder_uid is required")
+        submitted = pd.to_datetime(record.get("submitted_at_utc"), utc=True, errors="coerce")
+        if pd.isna(submitted):
+            raise ValueError("submitted_at_utc must be a valid timestamp")
+        for key, value in record.items():
+            if TAG_RE.fullmatch(str(key)) is None:
+                continue
+            numeric = pd.to_numeric(value, errors="coerce")
+            if pd.isna(numeric) or float(numeric) not in {0.0, 1.0, 2.0, 3.0}:
+                raise ValueError(f"invalid 0-3 tag value: {key}")
+        if boulder_uid not in allowed_boulder_uids:
+            outside_scope += 1
+            continue
+        accepted.append({
+            **record,
+            "boulder_uid": boulder_uid,
+            "contributor": reviewer,
+            "_submitted_at_utc": submitted,
+            "_input_order": input_order,
+        })
+    accepted.sort(key=lambda row: (row["_submitted_at_utc"], row["_input_order"]))
+    latest: dict[tuple[str, str], dict[str, object]] = {}
+    for record in accepted:
+        latest[(str(record["boulder_uid"]), str(record["contributor"]))] = record
+    return list(latest.values()), outside_scope
+
+
 def materialize_consensus(
     records: list[dict[str, object]], priority: pd.DataFrame, inventory: pd.DataFrame
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, object]]:
@@ -67,30 +109,19 @@ def materialize_consensus(
         str(boulder_uid): tuple(sorted(rows["problem_id"].astype(str)))
         for boulder_uid, rows in identity.groupby("boulder_uid", sort=True)
     }
+    latest_records, out_of_priority_records = latest_records_for_boulders(
+        records, set(boulder_to_problems)
+    )
     normalized: list[dict[str, object]] = []
-    out_of_priority_records = 0
-    for record in records:
-        if str(record.get("schema_version", "")) != "4.0":
-            raise ValueError("only schema-v4 records are accepted")
-        reviewer = str(record.get("contributor", "")).strip()
-        if REVIEWER_RE.fullmatch(reviewer) is None:
-            raise ValueError("invalid pseudonymous reviewer code")
-        boulder_uid = str(record.get("boulder_uid", ""))
-        if not boulder_uid:
-            raise ValueError("boulder_uid is required")
-        if boulder_uid not in boulder_to_problems:
-            out_of_priority_records += 1
-            continue
-        submitted = pd.to_datetime(record.get("submitted_at_utc"), utc=True, errors="coerce")
-        if pd.isna(submitted):
-            raise ValueError("submitted_at_utc must be a valid timestamp")
+    for record in latest_records:
+        reviewer = str(record["contributor"])
+        boulder_uid = str(record["boulder_uid"])
+        submitted = record["_submitted_at_utc"]
         for key, value in record.items():
             match = TAG_RE.fullmatch(str(key))
             if match is None:
                 continue
             numeric = pd.to_numeric(value, errors="coerce")
-            if pd.isna(numeric) or float(numeric) not in {0.0, 1.0, 2.0, 3.0}:
-                raise ValueError(f"invalid 0-3 tag value: {key}")
             for problem_id in boulder_to_problems[boulder_uid]:
                 normalized.append(
                     {
@@ -114,6 +145,7 @@ def materialize_consensus(
             "status": "READY_NO_REVIEWS",
             "coverage": {
                 "submitted_records": len(records),
+                "latest_reviewer_boulder_records": int(len(latest_records)),
                 "consensus_rows": 0,
                 "priority_source_items": int(len(priority)),
                 "priority_items_resolved_to_boulder_uid": int(len(identity)),
@@ -130,9 +162,7 @@ def materialize_consensus(
             },
         }
         return empty, long, report
-    long = long.sort_values("submitted_at_utc", kind="stable").drop_duplicates(
-        ["boulder_uid", "problem_id", "reviewer_code", "segment", "tag"], keep="last"
-    )
+    long = long.sort_values("submitted_at_utc", kind="stable")
     grouped = long.groupby(
         ["boulder_uid", "problem_id", "segment", "tag"], sort=True, as_index=False
     ).agg(
@@ -163,6 +193,7 @@ def materialize_consensus(
         "status": "RESEARCH_TAG_SUMMARY_READY_NO_MODEL_INPUT",
         "coverage": {
             "submitted_records": int(len(records)),
+            "latest_reviewer_boulder_records": int(len(latest_records)),
             "latest_reviewer_boulder_tag_rows": int(len(long)),
             "consensus_rows": int(len(grouped)),
             "boulders": int(grouped["boulder_uid"].nunique()),

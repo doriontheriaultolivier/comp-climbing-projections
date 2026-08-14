@@ -26,7 +26,8 @@ not discuss scores until both exports are saved.
 The operational roster is
 [`physical_tag_human_review_session_v1.csv`](../data/physical_tag_human_review_session_v1.csv).
 It contains no athlete identity or physical-test value. The app will normally
-surface these tasks automatically in the same coaching order.
+open directly on this 30-task session. The complete coaching-ranked and generic
+489-task queues remain available as alternate review orders.
 
 ## What happens after both reviews
 
@@ -35,6 +36,23 @@ materializer. It retains each reviewer's latest score, keeps start-to-Zone and
 Zone-to-Top separate, and preserves disagreement instead of forcing a single
 label. There is no arbitrary two-review model-eligibility cliff: this first
 session is an agreement and workflow audit.
+
+The session-bound consumer is:
+
+```powershell
+python scripts/materialize_physical_tag_review_session_v1.py `
+  --records comp_climbing_shared_style_tags.json `
+  --priority data/physical_item_tagging_priority_v1_1.csv `
+  --inventory data/boulder_problem_inventory.csv.gz `
+  --session data/physical_tag_human_review_session_v1.csv `
+  --session-receipt data/physical_tag_human_review_session_v1.json `
+  --output-dir .artifacts/restricted/physical-tag-review-consensus-v1
+```
+
+It binds the exact session hash, keeps each reviewer separately, inventories
+direction disagreements, and reports `not_started`, `single_review_complete`
+or `independently_double_reviewed` for every task. Even a complete session stays
+research-only until chronological coaching and forecast gates are passed.
 
 If task identity, saving and independent-review accounting all work, continue
 down the same continuous queue. The physical challenger remains inactive until
