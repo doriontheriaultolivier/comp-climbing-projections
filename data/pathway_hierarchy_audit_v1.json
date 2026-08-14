@@ -1,0 +1,14 @@
+{
+  "schema": "pathway-hierarchy-audit-v1",
+  "status": "UNFITTED_HIERARCHY_RESEARCH_ONLY",
+  "support_sha256": "1a8bfa6b302dfbc5c4a3791a03e15a0c66347549d4108f10ec8bb44f069961cd",
+  "rows": 21,
+  "hyperparameters_selected": false,
+  "binary_validity_threshold": false,
+  "interpretation": "Illustrative continuous parent borrowing only; event and bridge half-saturation values require nested chronological selection.",
+  "authority": {
+    "fit": false,
+    "promotion": false,
+    "deployment": false
+  }
+}
