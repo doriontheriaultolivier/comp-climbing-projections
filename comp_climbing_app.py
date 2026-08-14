@@ -33,6 +33,7 @@ from release_identity_senior_wc import (
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
+APP_CODE_RELEASE = "synthetic-future-vision-grant-demo-2026-08-13"
 RATING_ORDER = ["Global-ELO", "IFSC-ELO", "WC+-ELO"]
 FORMAT_OPTIONS = ["All formats", "Onsight", "Flash", "Scramble"]
 ALL_RATINGS = [
