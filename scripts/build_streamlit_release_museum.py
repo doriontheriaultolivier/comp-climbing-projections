@@ -118,9 +118,15 @@ def build_release_museum(
 
     _write_html(release_id, states, target / "index.html")
     _write_pdf((capture_target / item["filename"] for item in states), target / "all-states.pdf")
-    bundle = target / "source.bundle"
+    source_archive = target / "source.zip"
     subprocess.run(
-        ["git", "bundle", "create", str(bundle), commit],
+        [
+            "git",
+            "archive",
+            "--format=zip",
+            f"--output={source_archive.resolve()}",
+            commit,
+        ],
         cwd=repo,
         check=True,
         capture_output=True,
@@ -135,7 +141,7 @@ def build_release_museum(
         "state_count": len(states),
         "index_sha256": sha256(target / "index.html"),
         "pdf_sha256": sha256(target / "all-states.pdf"),
-        "source_bundle_sha256": sha256(bundle),
+        "source_archive_sha256": sha256(source_archive),
     }
     (target / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

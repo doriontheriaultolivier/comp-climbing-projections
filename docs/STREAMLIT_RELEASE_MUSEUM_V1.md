@@ -9,7 +9,7 @@ Each release contains:
 - five Evidence Lab captures: one for each primary overview;
 - an offline HTML index and one combined PDF;
 - a JSON manifest with every state and file hash;
-- a Git source bundle pinned to the deployed commit.
+- a source ZIP generated directly from the deployed Git commit.
 
 The builder fails when any required state is missing. Captures happen before publication;
 the archive is then built from the same commit and deployment candidate. This makes it
