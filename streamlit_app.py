@@ -1,6 +1,8 @@
 """Streamlit Community Cloud entry point."""
 
-from comp_climbing_app import main
+import importlib
+
+import comp_climbing_app
 
 
 # Changing the entry point forces Community Cloud to restart imported modules
@@ -8,4 +10,7 @@ from comp_climbing_app import main
 APP_RELEASE = "synthetic-future-vision-grant-demo-2026-08-13"
 
 
-main()
+if getattr(comp_climbing_app, "APP_CODE_RELEASE", None) != APP_RELEASE:
+    comp_climbing_app = importlib.reload(comp_climbing_app)
+
+comp_climbing_app.main()
