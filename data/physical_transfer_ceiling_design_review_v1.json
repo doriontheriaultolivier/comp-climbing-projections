@@ -1,0 +1,20 @@
+{
+  "athlete_names_transmitted": false,
+  "model_requested": "gemini-3.1-pro-preview",
+  "model_version": "gemini-3.1-pro-preview",
+  "private_rows_transmitted": false,
+  "promotion_authority": false,
+  "prompt_sha256": "15787a5a720214aa71410d647ad35dea047f9dc4c9102f5d45b20832930daaf9",
+  "request_sha256": "4df2997bec31a30efd6fc8294704b81441c3b87fca70c6e4e1098ed09c577d45",
+  "response_sha256": "23b96fe122f5177849f2935d431a580fc3b8eeac98734d0de1b2f701e5cdfce3",
+  "review_sha256": "71d4d28387169c227ebe2ceb958ef030a9fcf484a942c01bbff5a4e5f020b597",
+  "schema": "physical-transfer-ceiling-design-review-v1",
+  "traffic_type": "ON_DEMAND",
+  "usage_metadata": {
+    "candidatesTokenCount": 2148,
+    "promptTokenCount": 962,
+    "thoughtsTokenCount": 2004,
+    "totalTokenCount": 5114,
+    "trafficType": "ON_DEMAND"
+  }
+}
