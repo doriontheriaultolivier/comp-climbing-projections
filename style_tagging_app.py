@@ -20,6 +20,13 @@ import streamlit as st
 DATA = Path(__file__).resolve().parent / "data"
 
 
+HUMAN_REVIEW_SESSION_LABEL = "30-task coach session"
+HUMAN_REVIEW_WAVE_LABELS = {
+    "A_same_tasks_independent_calibration": "Wave A · independent calibration",
+    "B_high_unlock_extension": "Wave B · coaching extension",
+}
+
+
 BOULDER_LABEL = re.compile(r"^([MW])\s*[-:]?\s*([1-9][0-9]*)$", re.IGNORECASE)
 CORE_TAG_LABELS = {
     "physical_0_3": "Physical demand",
@@ -170,6 +177,111 @@ def problem_inventory() -> pd.DataFrame:
     return apply_tagging_priority(frame.loc[frame["event_name"].ne("")], priority)
 
 
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=1)
+def human_review_session() -> pd.DataFrame:
+    """Load the governed 30-task session and fail closed on contract drift."""
+
+    csv_path = DATA / "physical_tag_human_review_session_v1.csv"
+    receipt_path = DATA / "physical_tag_human_review_session_v1.json"
+    if not csv_path.exists() or not receipt_path.exists():
+        raise ValueError("the governed human-review session files are unavailable")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    expected_sha = str(receipt.get("output", {}).get("sha256", "")).strip()
+    actual_sha = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+    if not expected_sha or actual_sha != expected_sha:
+        raise ValueError("the human-review session does not match its governed receipt")
+    rows = pd.read_csv(csv_path, low_memory=False)
+    required = {
+        "session_task_order", "review_wave", "boulder_uid",
+        "requested_independent_reviewers", "required_review_scope", "task_status",
+    }
+    if not required.issubset(rows.columns):
+        raise ValueError("the human-review session schema is incomplete")
+    rows["session_task_order"] = pd.to_numeric(
+        rows["session_task_order"], errors="raise"
+    ).astype(int)
+    if (
+        len(rows) != 30
+        or not rows["boulder_uid"].is_unique
+        or rows["session_task_order"].tolist() != list(range(1, 31))
+        or set(rows["review_wave"]) != set(HUMAN_REVIEW_WAVE_LABELS)
+        or not rows["requested_independent_reviewers"].eq(2).all()
+        or not rows["task_status"].eq("human_review_pending").all()
+        or not rows["required_review_scope"].eq(
+            "directions_and_three_core_demands; detailed_tags_optional"
+        ).all()
+        or receipt.get("status") != "HUMAN_REVIEW_SESSION_READY_NO_TAGS_COMPLETED"
+        or receipt.get("claims", {}).get("model_input_authorized") is not False
+        or receipt.get("claims", {}).get("model_fit_authorized") is not False
+    ):
+        raise ValueError("the human-review session violates its governed contract")
+    wave_counts = rows["review_wave"].value_counts().to_dict()
+    if wave_counts != {
+        "B_high_unlock_extension": 20,
+        "A_same_tasks_independent_calibration": 10,
+    }:
+        raise ValueError("the human-review wave sizes have drifted")
+    return rows
+
+
+def apply_human_review_session(
+    inventory: pd.DataFrame, session: pd.DataFrame,
+) -> pd.DataFrame:
+    """Select and order exact governed tasks without altering inventory evidence."""
+
+    if inventory.empty or session.empty or "boulder_uid" not in inventory:
+        raise ValueError("the governed inventory cannot support the review session")
+    if not inventory["boulder_uid"].astype(str).is_unique:
+        raise ValueError("the governed inventory has duplicate Boulder identities")
+    session_uids = session["boulder_uid"].astype(str)
+    available = set(inventory["boulder_uid"].astype(str))
+    missing = sorted(set(session_uids) - available)
+    if missing:
+        raise ValueError(f"{len(missing)} governed session tasks are absent from inventory")
+    session_columns = [
+        "boulder_uid", "session_task_order", "review_wave",
+        "requested_independent_reviewers", "required_review_scope", "task_status",
+    ]
+    selected = session[session_columns].merge(
+        inventory, on="boulder_uid", how="left", validate="one_to_one"
+    )
+    return selected.sort_values("session_task_order", kind="stable").reset_index(drop=True)
+
+
+def review_session_progress(
+    session: pd.DataFrame,
+    records: list[dict[str, object]],
+    reviewer_code: str | None = None,
+) -> dict[str, int]:
+    """Return reviewer-specific and independent coverage for the exact session."""
+
+    uids = set(session["boulder_uid"].astype(str))
+    coverage = independent_review_coverage(records)
+    if not coverage.empty:
+        coverage = coverage.loc[coverage["boulder_uid"].isin(uids)]
+    wave_a = set(
+        session.loc[
+            session["review_wave"].eq("A_same_tasks_independent_calibration"),
+            "boulder_uid",
+        ].astype(str)
+    )
+    reviewed_any = reviewed_boulder_uids(records) & uids
+    reviewed_by_current = (
+        reviewed_boulder_uids(records, reviewer_code=reviewer_code) & uids
+        if reviewer_code else set()
+    )
+    double_reviewed = set(
+        coverage.loc[coverage["independent_reviewers"].ge(2), "boulder_uid"].astype(str)
+    ) if not coverage.empty else set()
+    return {
+        "tasks": len(uids),
+        "reviewed_any": len(reviewed_any),
+        "reviewed_by_current": len(reviewed_by_current),
+        "double_reviewed": len(double_reviewed),
+        "wave_a_double_reviewed": len(double_reviewed & wave_a),
+    }
+
+
 def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> pd.DataFrame:
     """Attach identity-free item priorities through exact round/problem keys."""
 
@@ -290,6 +402,11 @@ def apply_tagging_priority(inventory: pd.DataFrame, priority: pd.DataFrame) -> p
 def problem_display(row: pd.Series, *, prefer_coaching: bool = True) -> str:
     prefix = {"Men": "M", "Women": "W"}.get(str(row.gender), "B")
     route = f"{prefix}{int(row.boulder_number)} · governed {row.boulder_uid}"
+    if pd.notna(row.get("session_task_order")):
+        wave = HUMAN_REVIEW_WAVE_LABELS.get(
+            str(row.get("review_wave")), str(row.get("review_wave"))
+        )
+        return f"Task {int(row.session_task_order)}/30 · {wave} · {route}"
     if prefer_coaching and pd.notna(row.get("coaching_unlock_rank")):
         return (
             f"Coaching {int(row.coaching_unlock_rank)} · {route} · "
@@ -499,20 +616,38 @@ def main() -> None:
     st.title("Comp Climbing Boulder Tags")
     st.caption("Tag terrain demand, not athlete ability. Records bind to the governed boulder and its two segments.")
     st.info("0 absent · 1 secondary · 2 important · 3 defining. Score start-to-Zone and Zone-to-Top separately.")
-    inventory = problem_inventory()
-    if inventory.empty:
+    full_inventory = problem_inventory()
+    if full_inventory.empty:
         st.error("The governed boulder inventory is unavailable; tagging is disabled until it is restored.")
+        return
+    try:
+        session = human_review_session()
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        st.error(f"The governed 30-task review session is unavailable: {exc}")
         return
     review_order = st.radio(
         "Review order",
-        ("Coaching evidence unlocked", "Generic physical/Kilter evidence"),
+        (
+            HUMAN_REVIEW_SESSION_LABEL,
+            "Coaching evidence unlocked",
+            "Generic physical/Kilter evidence",
+        ),
         horizontal=True,
         help=(
-            "Coaching order prioritizes pending tags that connect to the most dated "
-            "physical and board observations. Generic order preserves the earlier "
-            "outcome-discordance priority. Neither is a model-readiness threshold."
+            "The governed session is the recommended 30-task handoff: Wave A asks two "
+            "reviewers to tag the same first 10 boulders independently, then Wave B "
+            "extends coaching coverage. The other views preserve the full queue. None "
+            "of these views is a model-readiness threshold."
         ),
     )
+    if review_order == HUMAN_REVIEW_SESSION_LABEL:
+        try:
+            inventory = apply_human_review_session(full_inventory, session)
+        except ValueError as exc:
+            st.error(f"The governed review session cannot be opened: {exc}")
+            return
+    else:
+        inventory = full_inventory.copy()
     if review_order == "Generic physical/Kilter evidence":
         inventory = inventory.sort_values(
             ["priority_rank", "event_date", "event_name", "round_group", "gender", "boulder_number"],
@@ -556,27 +691,51 @@ def main() -> None:
     top_pair_tasks = int(prioritized["priority_top_given_zone_pairs"].gt(0).sum())
     top_pairs = int(prioritized["priority_top_given_zone_pairs"].sum())
     zone_pairs = int(prioritized["priority_zone_pairs"].sum())
-    st.caption(
-        f"{len(prioritized):,} governed Boulder tagging tasks cover all "
-        f"{source_priority_items:,} physical/Kilter priority source items. Shared terrain "
-        "lets one reviewed tag serve multiple source records; priority is continuous, not "
-        "an inclusion cutoff."
-    )
-    milestones = tagging_coverage_milestones(tagging_priority_queue())
-    if not milestones.empty:
-        st.markdown("**What a short ranked review session unlocks**")
-        st.dataframe(milestones, hide_index=True, width="stretch")
-        st.caption(
-            "Athlete-item links repeat athletes across items. Discordant-pair counts are "
-            "within-item opportunities for comparing outcomes after a shared demand tag; "
-            "they are not independent competitions or a model-release threshold."
+    if review_order == HUMAN_REVIEW_SESSION_LABEL:
+        progress = review_session_progress(
+            session, all_records, reviewer_code=reviewer_code or None
         )
-    st.caption(
-        f"The evidence-rich first layer is {top_pair_tasks:,} tasks covering "
-        f"{top_pairs:,} exact both-board Top-given-Zone comparisons; the full queue "
-        f"also covers {zone_pairs:,} Zone comparisons. This orders human review by "
-        "expected evidence reuse, not by athlete importance."
-    )
+        st.markdown("**Governed coach review session · 30 tasks**")
+        st.caption(
+            "Wave A: the same first 10 boulders must be reviewed independently by two "
+            "pseudonymous reviewers. Wave B: 20 additional high-unlock boulders extend "
+            "the coaching sample. Required each time: both directions plus Physical, "
+            "Technical and Coordination demand; detailed tags remain optional."
+        )
+        st.caption(
+            f"Current reviewer: {progress['reviewed_by_current']}/30 complete · "
+            f"reviewed by anyone: {progress['reviewed_any']}/30 · independently "
+            f"double-reviewed: {progress['double_reviewed']}/30 · Wave A calibration: "
+            f"{progress['wave_a_double_reviewed']}/10 double-reviewed."
+        )
+        st.info(
+            "Work independently: do not compare scores before both Wave A reviews are "
+            "saved. This session contains no athlete identities or physical-test values, "
+            "and unfinished tags cannot enter a model."
+        )
+    else:
+        st.caption(
+            f"{len(prioritized):,} governed Boulder tagging tasks cover all "
+            f"{source_priority_items:,} physical/Kilter priority source items. Shared "
+            "terrain lets one reviewed tag serve multiple source records; priority is "
+            "continuous, not an inclusion cutoff."
+        )
+        milestones = tagging_coverage_milestones(tagging_priority_queue())
+        if not milestones.empty:
+            st.markdown("**What a short ranked review session unlocks**")
+            st.dataframe(milestones, hide_index=True, width="stretch")
+            st.caption(
+                "Athlete-item links repeat athletes across items. Discordant-pair counts "
+                "are within-item opportunities for comparing outcomes after a shared "
+                "demand tag; they are not independent competitions or a model-release "
+                "threshold."
+            )
+        st.caption(
+            f"The evidence-rich first layer is {top_pair_tasks:,} tasks covering "
+            f"{top_pairs:,} exact both-board Top-given-Zone comparisons; the full queue "
+            f"also covers {zone_pairs:,} Zone comparisons. This orders human review by "
+            "expected evidence reuse, not by athlete importance."
+        )
     include_completed = st.checkbox(
         "Include already reviewed boulders",
         value=False,
@@ -626,7 +785,7 @@ def main() -> None:
             round_rows["gender"].dropna().astype(str).drop_duplicates().tolist(),
         )
         terrain_rows = round_rows.loc[round_rows.gender.eq(terrain)]
-        prefer_coaching = review_order == "Coaching evidence unlocked"
+        prefer_coaching = review_order != "Generic physical/Kilter evidence"
         choices = terrain_rows.apply(
             lambda row: problem_display(row, prefer_coaching=prefer_coaching), axis=1
         ).tolist()
@@ -634,6 +793,16 @@ def main() -> None:
         selected_problem = terrain_rows.loc[terrain_rows.apply(
             lambda row: problem_display(row, prefer_coaching=prefer_coaching), axis=1
         ).eq(chosen_display)].iloc[0].to_dict()
+        if pd.notna(selected_problem.get("session_task_order")):
+            wave_label = HUMAN_REVIEW_WAVE_LABELS.get(
+                str(selected_problem.get("review_wave")),
+                str(selected_problem.get("review_wave")),
+            )
+            st.info(
+                f"Governed session task {int(selected_problem['session_task_order'])}/30 "
+                f"· {wave_label}. Two independent reviewer codes are requested; detailed "
+                "route-demand tags are optional."
+            )
         st.caption(f"{selected_problem['boulder_count_status']} count: {int(selected_problem['boulder_count'])}; terrain: {selected_problem['terrain_group']}")
         if pd.notna(selected_problem.get("priority_rank")):
             source_items = int(selected_problem.get("priority_source_items", 1))

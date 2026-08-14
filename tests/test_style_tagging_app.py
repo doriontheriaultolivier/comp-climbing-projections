@@ -43,21 +43,107 @@ class StyleTaggingAppTest(unittest.TestCase):
         coverage_captions = [caption.value for caption in app.caption]
         self.assertTrue(
             any(
-                "489 governed Boulder tagging tasks cover all 535" in caption
-                for caption in coverage_captions
-            )
-        )
-        self.assertTrue(
-            any(
-                "exact both-board Top-given-Zone comparisons" in caption
+                "Wave A: the same first 10 boulders" in caption
                 for caption in coverage_captions
             )
         )
         self.assertIn("Save style-tag proposal", [button.label for button in app.button])
         self.assertEqual(app.text_input[0].label, "Reviewer code")
-        self.assertTrue(str(app.selectbox[3].value).startswith("Coaching 1 ·"))
+        self.assertTrue(str(app.selectbox[3].value).startswith("Task 1/30 ·"))
         self.assertEqual(app.radio[0].label, "Review order")
+        self.assertEqual(app.radio[0].value, "30-task coach session")
+        self.assertTrue(
+            any("Wave A calibration: 0/10" in caption for caption in coverage_captions)
+        )
+
+    def test_governed_human_review_session_is_exact_and_identity_free(self) -> None:
+        module.human_review_session.clear()
+        session = module.human_review_session()
+        self.assertEqual(len(session), 30)
+        self.assertTrue(session["boulder_uid"].is_unique)
+        self.assertEqual(session["session_task_order"].tolist(), list(range(1, 31)))
+        self.assertEqual(
+            session["review_wave"].value_counts().to_dict(),
+            {
+                "B_high_unlock_extension": 20,
+                "A_same_tasks_independent_calibration": 10,
+            },
+        )
+        self.assertTrue(session["requested_independent_reviewers"].eq(2).all())
+        forbidden = {"athlete_id", "athlete_name", "test_value", "metric_value"}
+        self.assertFalse(forbidden.intersection(session.columns))
+
+    def test_governed_session_selects_and_orders_exact_inventory_tasks(self) -> None:
+        session = pd.DataFrame([
+            {
+                "boulder_uid": "b-2", "session_task_order": 2,
+                "review_wave": "B_high_unlock_extension",
+                "requested_independent_reviewers": 2,
+                "required_review_scope": "directions_and_three_core_demands; detailed_tags_optional",
+                "task_status": "human_review_pending",
+            },
+            {
+                "boulder_uid": "b-1", "session_task_order": 1,
+                "review_wave": "A_same_tasks_independent_calibration",
+                "requested_independent_reviewers": 2,
+                "required_review_scope": "directions_and_three_core_demands; detailed_tags_optional",
+                "task_status": "human_review_pending",
+            },
+        ])
+        inventory = pd.DataFrame([
+            {"boulder_uid": "b-1", "evidence": 11},
+            {"boulder_uid": "b-2", "evidence": 22},
+            {"boulder_uid": "b-3", "evidence": 33},
+        ])
+        selected = module.apply_human_review_session(inventory, session)
+        self.assertEqual(selected["boulder_uid"].tolist(), ["b-1", "b-2"])
+        self.assertEqual(selected["evidence"].tolist(), [11, 22])
+        with self.assertRaises(ValueError):
+            module.apply_human_review_session(inventory.iloc[[0]], session)
+
+    def test_session_progress_keeps_independent_reviewers_distinct(self) -> None:
+        session = pd.DataFrame([
+            {"boulder_uid": "b-1", "review_wave": "A_same_tasks_independent_calibration"},
+            {"boulder_uid": "b-2", "review_wave": "B_high_unlock_extension"},
+        ])
+        records = [
+            {"boulder_uid": "b-1", "contributor": "reviewer-a"},
+            {"boulder_uid": "b-1", "contributor": "reviewer-a"},
+            {"boulder_uid": "b-1", "contributor": "reviewer-b"},
+            {"boulder_uid": "b-2", "contributor": "reviewer-b"},
+        ]
+        progress = module.review_session_progress(
+            session, records, reviewer_code="reviewer-a"
+        )
+        self.assertEqual(
+            progress,
+            {
+                "tasks": 2,
+                "reviewed_any": 2,
+                "reviewed_by_current": 1,
+                "double_reviewed": 1,
+                "wave_a_double_reviewed": 1,
+            },
+        )
+
+    def test_full_coaching_queue_remains_available(self) -> None:
+        app = AppTest.from_file(str(PATH)).run(timeout=120)
+        app.radio[0].set_value("Coaching evidence unlocked").run(timeout=120)
+        self.assertFalse(app.exception)
         self.assertEqual(app.radio[0].value, "Coaching evidence unlocked")
+        self.assertTrue(str(app.selectbox[3].value).startswith("Coaching 1 ·"))
+        self.assertTrue(
+            any(
+                "489 governed Boulder tagging tasks cover all 535" in caption.value
+                for caption in app.caption
+            )
+        )
+        self.assertTrue(
+            any(
+                "exact both-board Top-given-Zone comparisons" in caption.value
+                for caption in app.caption
+            )
+        )
 
     def test_standalone_tagger_owns_its_data_path(self) -> None:
         self.assertEqual(module.DATA, PATH.parents[0] / "data")
@@ -300,6 +386,7 @@ class StyleTaggingAppTest(unittest.TestCase):
 
     def test_tagger_renders_incremental_review_table(self) -> None:
         app = AppTest.from_file(str(PATH)).run(timeout=120)
+        app.radio[0].set_value("Coaching evidence unlocked").run(timeout=120)
         self.assertFalse(app.exception)
         tables = [item.value for item in app.dataframe]
         milestone = next(
