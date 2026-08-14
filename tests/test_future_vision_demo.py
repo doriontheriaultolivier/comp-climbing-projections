@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
 from future_vision_demo import (
@@ -17,6 +19,9 @@ def _percent(value: str) -> int:
 
 
 def test_personas_cover_complete_synthetic_pathways() -> None:
+    assert PATHWAY_LEVELS == (
+        "Y-NAT", "Y-REG", "YW-IFSC", "NAT", "REG", "WC+",
+    )
     assert len(PERSONAS) >= 4
     assert "SYNTHETIC" in SYNTHETIC_MARK
     for persona in PERSONAS:
@@ -28,6 +33,16 @@ def test_personas_cover_complete_synthetic_pathways() -> None:
             <= _percent(row["Illustrative readiness SF"])
             for _, row in pathway.iterrows()
         )
+
+
+def test_future_vision_uses_governed_pathways_and_conditional_olympics() -> None:
+    source = Path("future_vision_demo.py").read_text(encoding="utf-8")
+    assert "Y-NAT → Y-REG → YW-IFSC" in source
+    assert "NAT → REG → WC+" in source
+    assert "OLY is not treated as a permanent rating rung" in source
+    assert '"YW"' not in source
+    assert '"WC"' not in source
+    assert '"OLY"' not in source
 
 
 def test_default_model_is_best_eligible_not_oldest() -> None:

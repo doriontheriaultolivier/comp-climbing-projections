@@ -14,9 +14,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from scripts.pathway_product_taxonomy_v2 import OPEN_LADDER, YOUTH_LADDER
+
 
 SYNTHETIC_MARK = "SYNTHETIC SCENARIO - ILLUSTRATIVE OUTPUT ONLY"
-PATHWAY_LEVELS = ("Y-NAT", "Y-REG", "YW", "NAT", "REG", "WC", "OLY")
+PATHWAY_LEVELS = YOUTH_LADDER + OPEN_LADDER
 
 
 @dataclass(frozen=True)
@@ -45,19 +47,19 @@ PERSONAS = (
         "Joe Bigbiceps", 2009, "Physical ceiling ahead of transfer",
         "Exceptional physical capacity; training-terrain and competition access lag behind it.",
         13.5, 17.3, 1260, 118, 94, 82, 61, 55,
-        ("Y-NAT", "Y-REG", "YW", "NAT"),
+        ("Y-NAT", "Y-REG", "YW-IFSC", "NAT"),
     ),
     SyntheticPersona(
         "Maya Transfergap", 2010, "Strong training output, uncertain competition transfer",
         "Training-board performance is progressing faster than results in unfamiliar competition settings.",
         12.8, 16.2, 1310, 104, 86, 90, 66, 62,
-        ("Y-NAT", "Y-REG", "YW"),
+        ("Y-NAT", "Y-REG", "YW-IFSC"),
     ),
     SyntheticPersona(
         "Sam Pressureproof", 2008, "Competition accessibility above physical ceiling",
         "Competition outcomes repeatedly exceed what isolated physical benchmarks would suggest.",
         13.4, 18.1, 1290, 96, 73, 79, 88, 93,
-        ("Y-NAT", "Y-REG", "YW", "NAT", "REG"),
+        ("Y-NAT", "Y-REG", "YW-IFSC", "NAT", "REG"),
     ),
     SyntheticPersona(
         "Alex Latebloomer", 2006, "Recent acceleration with limited historical support",
@@ -95,15 +97,15 @@ def synthetic_history(persona: SyntheticPersona) -> pd.DataFrame:
 def synthetic_pathway(persona: SyntheticPersona) -> pd.DataFrame:
     """Build internally nested illustrative pathway outputs for one persona."""
     level_difficulty = {
-        "Y-NAT": 1420, "Y-REG": 1580, "YW": 1750,
-        "NAT": 1640, "REG": 1810, "WC": 2040, "OLY": 2290,
+        "Y-NAT": 1420, "Y-REG": 1580, "YW-IFSC": 1750,
+        "NAT": 1640, "REG": 1810, "WC+": 2040,
     }
     state = float(synthetic_history(persona).iloc[-1]["historical_state"])
     rows = []
     for index, level in enumerate(PATHWAY_LEVELS):
         gap = state - level_difficulty[level]
         transfer = persona.competition_transfer / 100
-        if level in {"WC", "OLY"}:
+        if level == "WC+":
             transfer *= persona.pressure_access / 100
         semi = 1 / (1 + np.exp(-(gap * transfer) / 155))
         final = semi * (0.26 + 0.30 * transfer)
@@ -167,7 +169,7 @@ def _render_hero() -> None:
     )
     cols = st.columns(4)
     items = (
-        ("01", "See the pathway", "Y-NAT → Y-REG → YW and NAT → REG → WC → OLY"),
+        ("01", "See the pathway", "Y-NAT → Y-REG → YW-IFSC and NAT → REG → WC+"),
         ("02", "Compare development", "Youth categories, senior open fields and future-elite references"),
         ("03", "Find the constraint", "Physical ceiling → training transfer → competition access"),
         ("04", "Test decisions", "Turn evidence gaps into hypotheses and coach questions"),
@@ -342,8 +344,8 @@ def render_future_vision_demo() -> None:
 
     st.subheader("Development and competition pathways")
     youth, senior = st.columns(2)
-    youth.info("**Youth pathway**  ·  Y-NAT  →  Y-REG  →  YW")
-    senior.info("**Open pathway**  ·  NAT  →  REG  →  WC  →  OLY")
+    youth.info("**Youth pathway**  ·  Y-NAT  →  Y-REG  →  YW-IFSC")
+    senior.info("**Open pathway**  ·  NAT  →  REG  →  WC+")
     st.dataframe(
         synthetic_pathway(persona), use_container_width=True, hide_index=True,
         column_config={"Level": st.column_config.TextColumn(width="small")},
@@ -351,6 +353,11 @@ def render_future_vision_demo() -> None:
     st.caption(
         "Demonstrated cells represent fictional direct events. Readiness cells are illustrative target behavior, "
         "not validation results or claims about a real model."
+    )
+    st.info(
+        "**OLY scenario** · Olympic selection and performance would be projected as a "
+        "conditional event scenario using the relevant format, field and qualification "
+        "rules. OLY is not treated as a permanent rating rung."
     )
 
     history_tab, development_tab = st.tabs(("History and events", "Developmental references"))
