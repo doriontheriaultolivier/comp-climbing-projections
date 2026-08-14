@@ -58,6 +58,9 @@ backend is unavailable, the session export remains a recoverable safety copy.
 The current machine contract is [schema v4](schemas/boulder_style_tag_schema_v4.json);
 [schema v2](schemas/boulder_style_tag_schema_v2.json) and
 [schema v1](schemas/boulder_style_tag_schema_v1.json) remain for older exports.
+The first two-review coaching session is defined in the
+[human review handoff](docs/PHYSICAL_TAG_HUMAN_REVIEW_SESSION_V1.md); it uses the
+same continuous queue and does not create a model-eligibility cutoff.
 
 ## Rating contract
 

@@ -1,0 +1,40 @@
+{
+  "bindings": {
+    "data/boulder_problem_inventory.csv.gz": "7dbc9d93665e385813eedcba7182b9b72e0c7ad53ba1072f74d8f4c3afcd7bc1",
+    "data/physical_item_tag_unlock_app_v1.csv": "41a1e5916a20ff6f0b907d1599bf0fb9278104cf33c86dadda3dde673e8c632e",
+    "data/physical_item_tagging_priority_v1_1.csv": "08709c62df2279be5934f9e2953afa39692c36fb865cd57bf761899893bc13d7"
+  },
+  "claims": {
+    "coaching_prescription_authorized": false,
+    "completed_human_tags": 0,
+    "contains_athlete_identity": false,
+    "contains_physical_test_values": false,
+    "minimum_review_eligibility_cliff": null,
+    "model_fit_authorized": false,
+    "model_input_authorized": false
+  },
+  "next_gate": "Complete the same tasks independently, download the shared records, and materialize disagreement-preserving tag consensus.",
+  "operational_design": {
+    "core_demands_required": [
+      "physical_0_3",
+      "technical_0_3",
+      "coordination_0_3"
+    ],
+    "detailed_tags_optional": true,
+    "pseudonymous_reviewers": true,
+    "requested_independent_reviewers_per_task": 2,
+    "reviewers_must_work_independently": true,
+    "wave_a_tasks": 10,
+    "wave_b_tasks": 20
+  },
+  "output": {
+    "events": 5,
+    "path": "physical_tag_human_review_session_v1.csv",
+    "rows": 30,
+    "sha256": "12f08323bdd04fdd7b0bcc309f98fa8be76066cb84c38226463cfde628ec3517",
+    "unique_boulders": 30
+  },
+  "producer_sha256": "f548688f882e73d894a75ba14cf3b96e82cb2945ce31716c8db848b8a1e6bf24",
+  "schema": "physical-tag-human-review-session-v1",
+  "status": "HUMAN_REVIEW_SESSION_READY_NO_TAGS_COMPLETED"
+}
