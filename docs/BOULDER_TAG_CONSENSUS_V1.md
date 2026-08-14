@@ -1,7 +1,7 @@
 # Boulder tag consensus V1
 
 This is the deterministic consumer for downloaded schema-v4 tagger records.
-It keeps the latest submission from each pseudonymous reviewer for every
+It keeps the latest **whole submission** from each pseudonymous reviewer for every
 Boulder, preserves pre-zone and post-zone tags separately, and reports mean,
 standard deviation, range, independent-review count and a descriptive
 continuous evidence weight.
@@ -11,6 +11,10 @@ available with visibly weak evidence; additional independent reviews increase
 the descriptive weight only when their values agree. Neither the raw review nor
 the consensus table is authorized as a model input yet. Chronological outcome
 evaluation and held-out coaching-value checks are still required.
+
+Whole-record replacement matters for optional detail. If a reviewer submits a
+new record without detailed route-demand tags, an older optional value is not
+silently carried forward into the new consensus.
 
 Run after downloading the shared JSON record history:
 

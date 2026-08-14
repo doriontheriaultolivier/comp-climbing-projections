@@ -47,6 +47,21 @@ def test_latest_per_reviewer_and_segments_are_preserved() -> None:
     assert report["coverage"]["boulders_with_two_or_more_reviewers"] == 1
 
 
+def test_latest_whole_record_replaces_superseded_optional_tags() -> None:
+    earlier = {
+        **_record("reviewer-a", "2026-01-01T00:00:00Z", 1, 2),
+        "pre_zone_crimp_edge_0_3": 3,
+        "post_zone_crimp_edge_0_3": 2,
+    }
+    replacement = _record("reviewer-a", "2026-01-02T00:00:00Z", 2, 3)
+    summary, latest, report = materialize_consensus(
+        [earlier, replacement], _priority(), _inventory()
+    )
+    assert set(summary["tag"]) == {"physical_0_3"}
+    assert set(latest["tag"]) == {"physical_0_3"}
+    assert report["coverage"]["latest_reviewer_boulder_records"] == 1
+
+
 def test_one_review_is_retained_without_eligibility_cliff() -> None:
     summary, _, report = materialize_consensus(
         [_record("reviewer-a", "2026-01-01T00:00:00Z", 1, 2)], _priority(), _inventory()
